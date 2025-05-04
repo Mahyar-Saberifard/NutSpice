@@ -3,6 +3,12 @@
 using namespace std;
 
 int main() {
+    cout << "Hello World!" << endl;
+    cout << "salam" << endl;
+    for (int i = 0; i < 10;) {
+        cout << ++i << endl;
+    }
 
+    cout << " test req"<< endl;
     return 0;
 }
