@@ -9,6 +9,6 @@ int main() {
         cout << ++i << endl;
     }
 
-    cout << " test reqe"<< endl;
+    cout << " test re"<< endl;
     return 0;
 }
