@@ -231,6 +231,6 @@ int main() {
     }
 
     circuit.analyzeDC();
- cout << "new test"<< endl;
+
     return 0;
 }
