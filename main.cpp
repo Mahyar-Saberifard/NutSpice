@@ -8,6 +8,7 @@ enum ComponentType {
     INDUCTOR,
     VOLTAGE_SOURCE,
     CURRENT_SOURCE,
+    DIODE,
     GROUND
 };
 
@@ -22,61 +23,22 @@ public:
 
     virtual ~Component() {}
 
-    virtual void stamp(vector<vector<double>>& G, vector<vector<double>>& B, vector<vector<double>>& C, vector<vector<double>>& D, vector<double>& J, vector<double>& E, int& nextVariable) = 0;
+    virtual void stamp(vector<vector<double>>& G,
+                      vector<vector<double>>& B,
+                      vector<vector<double>>& C,
+                      vector<vector<double>>& D,
+                      vector<double>& J,
+                      vector<double>& E,
+                      int& nextVariable) = 0;
 
-    virtual void update(double dt) {}
-};
-
-class Resistor : public Component {
-public:
-    Resistor(const string& n, int n1, int n2, double val) : Component(RESISTOR, n, n1, n2, val) {}
-
-    void stamp(vector<vector<double>>& G, vector<vector<double>>& B, vector<vector<double>>& C, vector<vector<double>>& D, vector<double>& J, vector<double>& E, int& nextVariable) override {
-        double conductance = 1.0 / value;
-
-        if (node1 != 0) {
-            G[node1-1][node1-1] += conductance;
-            if (node2 != 0) {
-                G[node1-1][node2-1] -= conductance;
-                G[node2-1][node1-1] -= conductance;
-            }
-        }
-        if (node2 != 0) {
-            G[node2-1][node2-1] += conductance;
-        }
-    }
-};
-
-class VoltageSource : public Component {
-public:
-    VoltageSource(const string& n, int n1, int n2, double val) : Component(VOLTAGE_SOURCE, n, n1, n2, val) {}
-
-    void stamp(vector<vector<double>>& G, vector<vector<double>>& B, vector<vector<double>>& C, vector<vector<double>>& D, vector<double>& J, vector<double>& E, int& nextVariable) override {
-        int vsIndex = nextVariable++;
-
-        if (node1 != 0) B[node1-1][vsIndex] = 1;
-        if (node2 != 0) B[node2-1][vsIndex] = -1;
-
-        if (node1 != 0) C[vsIndex][node1-1] = 1;
-        if (node2 != 0) C[vsIndex][node2-1] = -1;
-
-        E[vsIndex] = value;
-    }
-};
-
-class Capacitor : public Component {
-    double prevVoltage;
-public:
-    Capacitor(const string& n, int n1, int n2, double val) : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0) {}
-
-    void stamp(vector<vector<double>>& G, vector<vector<double>>& B, vector<vector<double>>& C, vector<vector<double>>& D, vector<double>& J, vector<double>& E, int& nextVariable) override {}
-
-    void update(double dt) override {}
+    virtual void update(double dt, const vector<double>& nodeVoltages) {}
+    virtual double getCurrent(const vector<double>& nodeVoltages) const { return 0.0; }
 };
 
 class Circuit {
     vector<Component*> components;
     int maxNode;
+    static double currentTimeStep;
 
 public:
     Circuit() : maxNode(0) {}
@@ -137,25 +99,41 @@ public:
     void analyzeDC() {
         int numNodes = maxNode;
         int numVSources = 0;
+        int numInductors = 0;
 
         for (auto comp : components) {
-            if (comp->type == VOLTAGE_SOURCE) {
-                numVSources++;
-            }
+            if (comp->type == VOLTAGE_SOURCE) numVSources++;
+            if (comp->type == INDUCTOR) numInductors++;
         }
 
-        int numVars = numNodes + numVSources;
+        int numVars = numNodes + numVSources + numInductors;
 
         vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
-        vector<vector<double>> B(numNodes, vector<double>(numVSources, 0.0));
-        vector<vector<double>> C(numVSources, vector<double>(numNodes, 0.0));
-        vector<vector<double>> D(numVSources, vector<double>(numVSources, 0.0));
+        vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
+        vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
+        vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
         vector<double> J(numNodes, 0.0);
-        vector<double> E(numVSources, 0.0);
+        vector<double> E(numVSources + numInductors, 0.0);
 
         int vsCount = 0;
+        int indCount = 0;
         for (auto comp : components) {
-            comp->stamp(G, B, C, D, J, E, vsCount);
+            if (comp->type == INDUCTOR) {
+                double conductance = 1.0 / 1e-12;
+
+                if (comp->node1 != 0) {
+                    G[comp->node1-1][comp->node1-1] += conductance;
+                    if (comp->node2 != 0) {
+                        G[comp->node1-1][comp->node2-1] -= conductance;
+                        G[comp->node2-1][comp->node1-1] -= conductance;
+                    }
+                }
+                if (comp->node2 != 0) {
+                    G[comp->node2-1][comp->node2-1] += conductance;
+                }
+            } else {
+                comp->stamp(G, B, C, D, J, E, vsCount);
+            }
         }
 
         vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
@@ -165,15 +143,15 @@ public:
             for (int j = 0; j < numNodes; j++) {
                 A[i][j] = G[i][j];
             }
-            for (int j = 0; j < numVSources; j++) {
+            for (int j = 0; j < numVSources + numInductors; j++) {
                 A[i][numNodes + j] = B[i][j];
             }
         }
-        for (int i = 0; i < numVSources; i++) {
+        for (int i = 0; i < numVSources + numInductors; i++) {
             for (int j = 0; j < numNodes; j++) {
                 A[numNodes + i][j] = C[i][j];
             }
-            for (int j = 0; j < numVSources; j++) {
+            for (int j = 0; j < numVSources + numInductors; j++) {
                 A[numNodes + i][numNodes + j] = D[i][j];
             }
         }
@@ -181,7 +159,7 @@ public:
         for (int i = 0; i < numNodes; i++) {
             b[i] = J[i];
         }
-        for (int i = 0; i < numVSources; i++) {
+        for (int i = 0; i < numVSources + numInductors; i++) {
             b[numNodes + i] = E[i];
         }
 
@@ -198,9 +176,246 @@ public:
     }
 
     void analyzeTransient(double tStep, double tStop) {
-        cout << "\nTransient analysis would be implemented here\n";
+        currentTimeStep = tStep;
+        double t = 0.0;
+        int stepCount = 0;
+
+        int numNodes = maxNode;
+        int numVSources = 0;
+        int numInductors = 0;
+
+        for (auto comp : components) {
+            if (comp->type == VOLTAGE_SOURCE) numVSources++;
+            if (comp->type == INDUCTOR) numInductors++;
+        }
+
+        int numVars = numNodes + numVSources + numInductors;
+
+        cout << "\nStarting transient analysis from t=0 to t=" << tStop << " with step=" << tStep << "\n";
+
+        while (t < tStop) {
+            vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
+            vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
+            vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
+            vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
+            vector<double> J(numNodes, 0.0);
+            vector<double> E(numVSources + numInductors, 0.0);
+
+            int vsCount = 0;
+            int indCount = 0;
+            for (auto comp : components) {
+                comp->stamp(G, B, C, D, J, E, vsCount);
+            }
+
+            vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
+            vector<double> b(numVars, 0.0);
+
+            for (int i = 0; i < numNodes; i++) {
+                for (int j = 0; j < numNodes; j++) {
+                    A[i][j] = G[i][j];
+                }
+                for (int j = 0; j < numVSources + numInductors; j++) {
+                    A[i][numNodes + j] = B[i][j];
+                }
+            }
+            for (int i = 0; i < numVSources + numInductors; i++) {
+                for (int j = 0; j < numNodes; j++) {
+                    A[numNodes + i][j] = C[i][j];
+                }
+                for (int j = 0; j < numVSources + numInductors; j++) {
+                    A[numNodes + i][numNodes + j] = D[i][j];
+                }
+            }
+
+            for (int i = 0; i < numNodes; i++) {
+                b[i] = J[i];
+            }
+            for (int i = 0; i < numVSources + numInductors; i++) {
+                b[numNodes + i] = E[i];
+            }
+
+            vector<double> x = solveSystem(A, b);
+
+            for (auto comp : components) {
+                comp->update(tStep, x);
+            }
+
+            if (stepCount % 10 == 0) {
+                cout << "\nTime = " << t << " seconds:\n";
+                for (int i = 0; i < numNodes; i++) {
+                    cout << "  Node " << (i+1) << " voltage: " << x[i] << " V\n";
+                }
+                for (auto comp : components) {
+                    if (comp->type == CAPACITOR || comp->type == INDUCTOR) {
+                        cout << "  Current through " << comp->name << ": "
+                             << comp->getCurrent(x) << " A\n";
+                    }
+                }
+            }
+
+            t += tStep;
+            stepCount++;
+        }
+    }
+
+    static double getTimeStep() { return currentTimeStep; }
+
+    vector<Component*> getComponents() { return components; }
+
+};
+
+class Resistor : public Component {
+public:
+    Resistor(const string& n, int n1, int n2, double val) : Component(RESISTOR, n, n1, n2, val) {}
+
+    void stamp(vector<vector<double>>& G,
+              vector<vector<double>>& B,
+              vector<vector<double>>& C,
+              vector<vector<double>>& D,
+              vector<double>& J,
+              vector<double>& E,
+              int& nextVariable) override {
+        double conductance = 1.0 / value;
+
+        if (node1 != 0) {
+            G[node1-1][node1-1] += conductance;
+            if (node2 != 0) {
+                G[node1-1][node2-1] -= conductance;
+                G[node2-1][node1-1] -= conductance;
+            }
+        }
+        if (node2 != 0) {
+            G[node2-1][node2-1] += conductance;
+        }
+    }
+
+    double getCurrent(const vector<double>& nodeVoltages) const override {
+        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
+        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
+        return (v1 - v2) / value;
     }
 };
+
+class VoltageSource : public Component {
+public:
+    VoltageSource(const string& n, int n1, int n2, double val) : Component(VOLTAGE_SOURCE, n, n1, n2, val) {}
+
+    void stamp(vector<vector<double>>& G,
+              vector<vector<double>>& B,
+              vector<vector<double>>& C,
+              vector<vector<double>>& D,
+              vector<double>& J,
+              vector<double>& E,
+              int& nextVariable) override {
+        int vsIndex = nextVariable++;
+
+        if (node1 != 0) B[node1-1][vsIndex] = 1;
+        if (node2 != 0) B[node2-1][vsIndex] = -1;
+
+        if (node1 != 0) C[vsIndex][node1-1] = 1;
+        if (node2 != 0) C[vsIndex][node2-1] = -1;
+
+        E[vsIndex] = value;
+    }
+};
+
+class Capacitor : public Component {
+    double prevVoltage;
+    double companionCurrent;
+public:
+    Capacitor(const string& n, int n1, int n2, double val) : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0), companionCurrent(0.0) {}
+
+    void stamp(vector<vector<double>>& G,
+              vector<vector<double>>& B,
+              vector<vector<double>>& C,
+              vector<vector<double>>& D,
+              vector<double>& J,
+              vector<double>& E,
+              int& nextVariable) override {
+        double geq = value / Circuit::getTimeStep();
+
+        if (node1 != 0) {
+            G[node1-1][node1-1] += geq;
+            if (node2 != 0) {
+                G[node1-1][node2-1] -= geq;
+                G[node2-1][node1-1] -= geq;
+            }
+        }
+        if (node2 != 0) {
+            G[node2-1][node2-1] += geq;
+        }
+
+        double ieq = -geq * prevVoltage;
+        if (node1 != 0) J[node1-1] -= ieq;
+        if (node2 != 0) J[node2-1] += ieq;
+    }
+
+    void update(double dt, const vector<double>& nodeVoltages) override {
+        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
+        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
+        prevVoltage = v1 - v2;
+    }
+
+    double getCurrent(const vector<double>& nodeVoltages) const override {
+        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
+        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
+        double current = value * ((v1 - v2) - prevVoltage) / Circuit::getTimeStep();
+        return current;
+    }
+};
+
+class Inductor : public Component {
+    double prevCurrent;
+    double companionVoltage;
+public:
+    Inductor(const string& n, int n1, int n2, double val) : Component(INDUCTOR, n, n1, n2, val), prevCurrent(0.0), companionVoltage(0.0) {}
+
+    void stamp(vector<vector<double>>& G,
+              vector<vector<double>>& B,
+              vector<vector<double>>& C,
+              vector<vector<double>>& D,
+              vector<double>& J,
+              vector<double>& E,
+              int& nextVariable) override {
+        int inductorIndex = nextVariable++;
+
+        if (node1 != 0) B[node1-1][inductorIndex] = 1;
+        if (node2 != 0) B[node2-1][inductorIndex] = -1;
+
+        if (node1 != 0) C[inductorIndex][node1-1] = 1;
+        if (node2 != 0) C[inductorIndex][node2-1] = -1;
+
+        D[inductorIndex][inductorIndex] = -value / Circuit::getTimeStep();
+
+        E[inductorIndex] = -prevCurrent;
+    }
+
+    void update(double dt, const vector<double>& nodeVoltages) override {
+        prevCurrent = nodeVoltages.back();
+    }
+
+    double getCurrent(const vector<double>& nodeVoltages) const override {
+        return nodeVoltages.back();
+    }
+};
+
+class CurrentSource : public Component {
+public:
+    CurrentSource(const string& n, int n1, int n2, double val) : Component(CURRENT_SOURCE, n, n1, n2, val) {}
+
+    void stamp(vector<vector<double>>& G,
+              vector<vector<double>>& B,
+              vector<vector<double>>& C,
+              vector<vector<double>>& D,
+              vector<double>& J,
+              vector<double>& E,
+              int& nextVariable) override {
+        if (node1 != 0) J[node1-1] -= value;
+        if (node2 != 0) J[node2-1] += value;
+    }
+};
+
+double Circuit::currentTimeStep = 0.0;
 
 int main() {
     Circuit circuit;
@@ -208,9 +423,10 @@ int main() {
     int n1, n2, VCount = 0, RCount = 0, CCount = 0, LCount = 0, ICount = 0, DCount = 0;
     double val;
 
-    cout << "input format:\nType(V, R, C, L, I, D) - node1 - node2 - value\ntype analyze to analyze! (best tip doesn't exi...)\n";
+    cout << "Format: Type(V,R,C,L,I,D) node1 node2 value\nType 'analyze' to run.\n";
 
     while (true) {
+        cout << "> ";
         cin >> type;
 
         if (type == "analyze") {
@@ -226,11 +442,36 @@ int main() {
             } else if (type == "C") {
                 CCount++;
                 circuit.addComponent(new Capacitor("C" + to_string(CCount), n1, n2, val));
+            } else if (type == "L") {
+                LCount++;
+                circuit.addComponent(new Inductor("L" + to_string(LCount), n1, n2, val));
+            } else if (type == "I") {
+                ICount++;
+                circuit.addComponent(new CurrentSource("I" + to_string(ICount), n1, n2, val));
+            } else {
+                cout << "Unknown component type: " << type << "\n";
             }
         }
     }
 
-    circuit.analyzeDC();
+    bool hasDynamic = false;
+    for (auto comp : circuit.getComponents()) {
+        if (comp->type == CAPACITOR || comp->type == INDUCTOR) {
+            hasDynamic = true;
+            break;
+        }
+    }
+
+    if (!hasDynamic) {
+        circuit.analyzeDC();
+    }else {
+        double tStep, tStop;
+        cout << "Enter time step: ";
+        cin >> tStep;
+        cout << "Enter stop time: ";
+        cin >> tStop;
+        circuit.analyzeTransient(tStep, tStop);
+    }
 
     return 0;
 }
