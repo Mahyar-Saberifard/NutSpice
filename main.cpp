@@ -247,9 +247,9 @@ public:
             }
 
             if (stepCount % 10 == 0) {
-                times.push_back(t);
                 cout << "\nTime = " << t << " seconds:\n";
                 for (int i = 0; i < numNodes; i++) {
+                    times.push_back(t);
                     voltages.push_back(x[i]);
                     cout << "  Node " << (i+1) << " voltage: " << x[i] << " V\n";
                 }
@@ -455,12 +455,12 @@ void plotVoltageTimeGraph(SDL_Renderer* renderer,
     float scaleX = (width - 2 * margin) / (maxTime - minTime);
     float scaleY = (height - 2 * margin) / (maxVoltage - minVoltage);
 
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // White background
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
-    SDL_SetRenderDrawColor(renderer, 0, 225, 0, 255); // Black axes
-    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin); // X-axis
-    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin); // Y-axis
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin);
+    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin);
 
     for (float t = minTime; t <= maxTime; t += (maxTime - minTime) / 5) {
         int x = margin + static_cast<int>((t - minTime) * scaleX);
@@ -472,7 +472,7 @@ void plotVoltageTimeGraph(SDL_Renderer* renderer,
         SDL_RenderDrawLine(renderer, margin - 5, y, margin + 5, y);
     }
 
-    SDL_SetRenderDrawColor(renderer, 0, 100, 100, 255); // Red points
+    SDL_SetRenderDrawColor(renderer, 0, 255, 100, 255);
     for (size_t i = 0; i < voltages.size(); ++i) {
         int x = margin + static_cast<int>((times[i] - minTime) * scaleX);
         int y = height - margin - static_cast<int>((voltages[i] - minVoltage) * scaleY);
@@ -488,7 +488,7 @@ void plotVoltageTimeGraph(SDL_Renderer* renderer,
 }
 
 
-int main() {
+int SDL_main(int argc, char* argv[]) {
     Circuit circuit;
     string type;
     int n1, n2, VCount = 0, RCount = 0, CCount = 0, LCount = 0, ICount = 0, DCount = 0;
@@ -555,9 +555,13 @@ int main() {
 
     plotVoltageTimeGraph(renderer, voltages, times, 800, 600);
 
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    int k;
+    cin >> k;
+    if (k) {
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+    }
 
     return 0;
 }
