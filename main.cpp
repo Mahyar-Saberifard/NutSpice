@@ -1,6 +1,12 @@
 #include <bits/stdc++.h>
+#include <SDL2/SDL.h>
 
 using namespace std;
+
+
+vector<double> voltages;
+vector<double> times;
+
 
 enum ComponentType {
     RESISTOR,
@@ -241,14 +247,15 @@ public:
             }
 
             if (stepCount % 10 == 0) {
+                times.push_back(t);
                 cout << "\nTime = " << t << " seconds:\n";
                 for (int i = 0; i < numNodes; i++) {
+                    voltages.push_back(x[i]);
                     cout << "  Node " << (i+1) << " voltage: " << x[i] << " V\n";
                 }
                 for (auto comp : components) {
                     if (comp->type == CAPACITOR || comp->type == INDUCTOR) {
-                        cout << "  Current through " << comp->name << ": "
-                             << comp->getCurrent(x) << " A\n";
+                        cout << "  Current through " << comp->name << ": " << comp->getCurrent(x) << " A\n";
                     }
                 }
             }
@@ -417,6 +424,70 @@ public:
 
 double Circuit::currentTimeStep = 0.0;
 
+
+void plotVoltageTimeGraph(SDL_Renderer* renderer,
+                         const std::vector<double>& voltages,
+                         const std::vector<double>& times,
+                         int width, int height,
+                         int margin = 50) {
+    if (voltages.empty() || times.empty() || voltages.size() != times.size()) {
+        SDL_Log("Error: Invalid input data for plotting");
+        return;
+    }
+
+    float minVoltage = voltages[0], maxVoltage = voltages[0];
+    float minTime = times[0], maxTime = times[0];
+
+    for (size_t i = 1; i < voltages.size(); ++i) {
+        if (voltages[i] < minVoltage) minVoltage = voltages[i];
+        if (voltages[i] > maxVoltage) maxVoltage = voltages[i];
+        if (times[i] < minTime) minTime = times[i];
+        if (times[i] > maxTime) maxTime = times[i];
+    }
+
+    float voltageRange = maxVoltage - minVoltage;
+    float timeRange = maxTime - minTime;
+    maxVoltage += voltageRange * 0.1f;
+    minVoltage -= voltageRange * 0.1f;
+    maxTime += timeRange * 0.1f;
+    minTime -= timeRange * 0.1f;
+
+    float scaleX = (width - 2 * margin) / (maxTime - minTime);
+    float scaleY = (height - 2 * margin) / (maxVoltage - minVoltage);
+
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // White background
+    SDL_RenderClear(renderer);
+
+    SDL_SetRenderDrawColor(renderer, 0, 225, 0, 255); // Black axes
+    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin); // X-axis
+    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin); // Y-axis
+
+    for (float t = minTime; t <= maxTime; t += (maxTime - minTime) / 5) {
+        int x = margin + static_cast<int>((t - minTime) * scaleX);
+        SDL_RenderDrawLine(renderer, x, height - margin - 5, x, height - margin + 5);
+    }
+
+    for (float v = minVoltage; v <= maxVoltage; v += (maxVoltage - minVoltage) / 5) {
+        int y = height - margin - static_cast<int>((v - minVoltage) * scaleY);
+        SDL_RenderDrawLine(renderer, margin - 5, y, margin + 5, y);
+    }
+
+    SDL_SetRenderDrawColor(renderer, 0, 100, 100, 255); // Red points
+    for (size_t i = 0; i < voltages.size(); ++i) {
+        int x = margin + static_cast<int>((times[i] - minTime) * scaleX);
+        int y = height - margin - static_cast<int>((voltages[i] - minVoltage) * scaleY);
+        SDL_RenderDrawPoint(renderer, x, y);
+
+        SDL_RenderDrawPoint(renderer, x+1, y);
+        SDL_RenderDrawPoint(renderer, x-1, y);
+        SDL_RenderDrawPoint(renderer, x, y+1);
+        SDL_RenderDrawPoint(renderer, x, y-1);
+    }
+
+    SDL_RenderPresent(renderer);
+}
+
+
 int main() {
     Circuit circuit;
     string type;
@@ -472,6 +543,21 @@ int main() {
         cin >> tStop;
         circuit.analyzeTransient(tStep, tStop);
     }
+
+
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Window* window = SDL_CreateWindow("Voltage vs Time Graph",
+                                         SDL_WINDOWPOS_CENTERED,
+                                         SDL_WINDOWPOS_CENTERED,
+                                         800, 600,
+                                         SDL_WINDOW_SHOWN);
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+
+    plotVoltageTimeGraph(renderer, voltages, times, 800, 600);
+
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 
     return 0;
 }
