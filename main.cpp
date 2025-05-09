@@ -373,9 +373,8 @@ public:
 
 class Inductor : public Component {
     double prevCurrent;
-    double companionVoltage;
 public:
-    Inductor(const string& n, int n1, int n2, double val) : Component(INDUCTOR, n, n1, n2, val), prevCurrent(0.0), companionVoltage(0.0) {}
+    Inductor(const string& n, int n1, int n2, double val) : Component(INDUCTOR, n, n1, n2, val), prevCurrent(0.0) {}
 
     void stamp(vector<vector<double>>& G,
               vector<vector<double>>& B,
@@ -384,17 +383,18 @@ public:
               vector<double>& J,
               vector<double>& E,
               int& nextVariable) override {
-        int inductorIndex = nextVariable++;
 
-        if (node1 != 0) B[node1-1][inductorIndex] = 1;
-        if (node2 != 0) B[node2-1][inductorIndex] = -1;
+        int inductorVarIndex = nextVariable++;
 
-        if (node1 != 0) C[inductorIndex][node1-1] = 1;
-        if (node2 != 0) C[inductorIndex][node2-1] = -1;
+        if (node1 != 0) B[node1-1][inductorVarIndex] = 1;
+        if (node2 != 0) B[node2-1][inductorVarIndex] = -1;
 
-        D[inductorIndex][inductorIndex] = -value / Circuit::getTimeStep();
+        if (node1 != 0) C[inductorVarIndex][node1-1] = 1;
+        if (node2 != 0) C[inductorVarIndex][node2-1] = -1;
 
-        E[inductorIndex] = -prevCurrent;
+        D[inductorVarIndex][inductorVarIndex] = -value / Circuit::getTimeStep();
+
+        E[inductorVarIndex] = -prevCurrent;
     }
 
     void update(double dt, const vector<double>& nodeVoltages) override {
@@ -553,14 +553,16 @@ int SDL_main(int argc, char* argv[]) {
                                          SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
-    plotVoltageTimeGraph(renderer, voltages, times, 800, 600);
+    if (hasDynamic) {
+        plotVoltageTimeGraph(renderer, voltages, times, 800, 600);
 
-    int k;
-    cin >> k;
-    if (k) {
-        SDL_DestroyRenderer(renderer);
-        SDL_DestroyWindow(window);
-        SDL_Quit();
+        int k;
+        cin >> k;
+        if (k) {
+            SDL_DestroyRenderer(renderer);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+        }
     }
 
     return 0;
