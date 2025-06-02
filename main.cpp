@@ -4,8 +4,12 @@
 using namespace std;
 
 vector<double> voltages;
-vector<double> times;
+vector<double> currents;
+vector<double> Vtimes;
+vector<double> Itimes;
 bool hasDynamic = false;
+bool showVoltage = true;
+bool showCurrent = false;
 
 enum ComponentType {
     RESISTOR,
@@ -190,7 +194,8 @@ public:
         double t = 0.0;
 
         voltages.clear();
-        times.clear();
+        currents.clear();
+        Vtimes.clear();
 
         if (maxNode < 1) {
             cerr << "Error: Circuit must have at least one non-ground node" << endl;
@@ -262,8 +267,15 @@ public:
             }
 
             for (int i = 0; i < numNodes; i++) {
-                times.push_back(t);
+                Vtimes.push_back(t);
                 voltages.push_back(x[i]);
+            }
+
+            for (auto comp : components) {
+                if (comp->type == RESISTOR || comp->type == CAPACITOR || comp->type == INDUCTOR || comp->type == DIODE) {
+                    Itimes.push_back(t);
+                    currents.push_back(comp->getCurrent(x));
+                }
             }
 
             t += tStep;
@@ -500,10 +512,8 @@ public:
 
 double Circuit::currentTimeStep = 0.0;
 
-void plotVoltageTimeGraph(SDL_Renderer* renderer,const vector<double>& voltages,const vector<double>& times,int width, int height,int margin = 50)
-
-{
-    if (voltages.empty() || times.empty() || voltages.size() != times.size()) {
+void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector<double>& data2, const vector<double>& Vtimes, const vector<double>& Itimes, int width, int height, int margin = 50) {
+    if (Vtimes.empty() || (data1.empty() && data2.empty())) {
         SDL_Log("Plotting error: No valid data to display");
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderClear(renderer);
@@ -511,45 +521,68 @@ void plotVoltageTimeGraph(SDL_Renderer* renderer,const vector<double>& voltages,
         return;
     }
 
-    double minVoltage = *min_element(voltages.begin(), voltages.end());
-    double maxVoltage = *max_element(voltages.begin(), voltages.end());
-    double minTime = *min_element(times.begin(), times.end());
-    double maxTime = *max_element(times.begin(), times.end());
+    double minY1 = data1.empty() ? 0 : *min_element(data1.begin(), data1.end());
+    double maxY1 = data1.empty() ? 0 : *max_element(data1.begin(), data1.end());
+    double minY2 = data2.empty() ? 0 : *min_element(data2.begin(), data2.end());
+    double maxY2 = data2.empty() ? 0 : *max_element(data2.begin(), data2.end());
+    double minTime = Vtimes.front();
+    double maxTime = Vtimes.back();
 
-    double voltageRange = maxVoltage - minVoltage;
-    double timeRange = maxTime - minTime;
-    maxVoltage += voltageRange * 0.1;
-    minVoltage -= voltageRange * 0.1;
-    maxTime += timeRange * 0.1;
-    minTime -= timeRange * 0.1;
+    if (maxY1 == minY1) { maxY1 += 1; minY1 -= 1; }
+    if (maxY2 == minY2) { maxY2 += 1; minY2 -= 1; }
+
+    double yRange1 = maxY1 - minY1;
+    double yRange2 = maxY2 - minY2;
+    maxY1 += yRange1 * 0.1;
+    minY1 -= yRange1 * 0.1;
+    maxY2 += yRange2 * 0.1;
+    minY2 -= yRange2 * 0.1;
+
+    double minY = showVoltage ? minY1 : minY2;
+    double maxY = showVoltage ? maxY1 : maxY2;
+    if (showVoltage && showCurrent) {
+        minY = min(minY1, minY2);
+        maxY = max(maxY1, maxY2);
+    }
 
     double scaleX = (width - 2 * margin) / (maxTime - minTime);
-    double scaleY = (height - 2 * margin) / (maxVoltage - minVoltage);
+    double scaleY = (height - 2 * margin) / (maxY - minY);
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin);
-    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin);
+    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin); // X-axis
+    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin); // Y-axis
 
     for (double t = minTime; t <= maxTime; t += (maxTime - minTime) / 5) {
         int x = margin + static_cast<int>((t - minTime) * scaleX);
         SDL_RenderDrawLine(renderer, x, height - margin - 5, x, height - margin + 5);
     }
 
-    for (double v = minVoltage; v <= maxVoltage; v += (maxVoltage - minVoltage) / 5) {
-        int y = height - margin - static_cast<int>((v - minVoltage) * scaleY);
-        SDL_RenderDrawLine(renderer, margin - 5, y, margin + 5, y);
+    for (double y = minY; y <= maxY; y += (maxY - minY) / 5) {
+        int yPos = height - margin - static_cast<int>((y - minY) * scaleY);
+        SDL_RenderDrawLine(renderer, margin - 5, yPos, margin + 5, yPos);
     }
 
-    SDL_SetRenderDrawColor(renderer, 0, 255, 100, 255);
-    for (size_t i = 0; i < voltages.size(); ++i) {
-        int x = margin + static_cast<int>((times[i] - minTime) * scaleX);
-        int y = height - margin - static_cast<int>((voltages[i] - minVoltage) * scaleY);
+    if (showVoltage && !data1.empty()) {
+        SDL_SetRenderDrawColor(renderer, 0, 255, 100, 255);
+        for (size_t i = 0; i < data1.size(); ++i) {
+            int x = margin + static_cast<int>((Vtimes[i] - minTime) * scaleX);
+            int y = height - margin - static_cast<int>((data1[i] - minY) * scaleY);
+            SDL_RenderDrawLine(renderer, x-2, y, x+2, y);
+            SDL_RenderDrawLine(renderer, x, y-2, x, y+2);
+        }
+    }
 
-        SDL_RenderDrawLine(renderer, x-2, y, x+2, y);
-        SDL_RenderDrawLine(renderer, x, y-2, x, y+2);
+    if (showCurrent && !data2.empty()) {
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+        for (size_t i = 0; i < data2.size(); ++i) {
+            int x = margin + static_cast<int>((Itimes[i] - minTime) * scaleX);
+            int y = height - margin - static_cast<int>((data2[i] - minY) * scaleY);
+            SDL_RenderDrawLine(renderer, x-2, y-2, x+2, y+2);
+            SDL_RenderDrawLine(renderer, x-2, y+2, x+2, y-2);
+        }
     }
 
     SDL_RenderPresent(renderer);
@@ -558,11 +591,11 @@ void plotVoltageTimeGraph(SDL_Renderer* renderer,const vector<double>& voltages,
 int main(int argc, char* argv[]) {
     Circuit circuit;
     string type;
-    int n1, n2, VCount = 0, RCount = 0, CCount = 0, LCount = 0, ICount = 0;
+    static int n1, n2, VCount = 0, RCount = 0, CCount = 0, LCount = 0, ICount = 0, DCount = 0, JCount = 0, ECount = 0;
     double val;
 
     cout << "Circuit Simulator\n";
-    cout << "Format: Type(V,R,C,L,I) node1 node2 value\n";
+    cout << "Format: Type(V,R,C,L,I,D) node1 node2 value\n";
     cout << "Type 'analyze' to run simulation.\n";
 
     while (true) {
@@ -571,7 +604,7 @@ int main(int argc, char* argv[]) {
         if (type == "analyze") {
             break;
         }
-        else if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I") {
+        else if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I" || type == "D") {
             cin >> n1 >> n2 >> val;
             if (type == "V") {
                 VCount++;
@@ -584,14 +617,10 @@ int main(int argc, char* argv[]) {
                 cin >> n1;
                 circuit.addComponent(new Ground("GND", n1));
             }
-            else if (type == "D" || type == "Z") {
-                cin >> n1 >> n2;
-                static int DCount = 0;
+            else if (type == "D") {
                 DCount++;
-                double threshold = (type == "D") ? 0.0 : 0.7;
-                circuit.addComponent(new Diode("D" + to_string(DCount), n1, n2, threshold));
+                circuit.addComponent(new Diode("D" + to_string(DCount), n1, n2, val));
             }
-
             else if (type == "C") {
                 CCount++;
                 circuit.addComponent(new Capacitor("C" + to_string(CCount), n1, n2, val));
@@ -609,6 +638,26 @@ int main(int argc, char* argv[]) {
             cout << "Unknown component type: " << type << "\n";
             cin.ignore(numeric_limits<streamsize>::max(), '\n');
         }
+    }
+
+    // Ask user what to plot
+    char choice;
+    cout << "What would you like to plot? (V)oltage, (C)urrent, or (B)oth? ";
+    cin >> choice;
+
+    if (toupper(choice) == 'V') {
+        showVoltage = true;
+        showCurrent = false;
+    } else if (toupper(choice) == 'C') {
+        showVoltage = false;
+        showCurrent = true;
+    } else if (toupper(choice) == 'B') {
+        showVoltage = true;
+        showCurrent = true;
+    } else {
+        cout << "Invalid choice. Defaulting to voltage only.\n";
+        showVoltage = true;
+        showCurrent = false;
     }
 
     try {
@@ -652,7 +701,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        plotVoltageTimeGraph(renderer, voltages, times, 800, 600);
+        plotGraph(renderer, voltages, currents, Vtimes, Itimes, 800, 600);
 
         SDL_Event e;
         bool quit = false;
