@@ -25,17 +25,17 @@ public:
     double value;
 
     Component(ComponentType t, const string& n, int n1, int n2, double val)
-        : type(t), name(n), node1(n1), node2(n2), value(val) {}
+            : type(t), name(n), node1(n1), node2(n2), value(val) {}
 
     virtual ~Component() {}
 
     virtual void stamp(vector<vector<double>>& G,
-                      vector<vector<double>>& B,
-                      vector<vector<double>>& C,
-                      vector<vector<double>>& D,
-                      vector<double>& J,
-                      vector<double>& E,
-                      int& nextVariable) = 0;
+                       vector<vector<double>>& B,
+                       vector<vector<double>>& C,
+                       vector<vector<double>>& D,
+                       vector<double>& J,
+                       vector<double>& E,
+                       int& nextVariable) = 0;
 
     virtual void update(double dt, const vector<double>& nodeVoltages) {}
     virtual double getCurrent(const vector<double>& nodeVoltages) const { return 0.0; }
@@ -278,12 +278,12 @@ public:
     Resistor(const string& n, int n1, int n2, double val) : Component(RESISTOR, n, n1, n2, val) {}
 
     void stamp(vector<vector<double>>& G,
-              vector<vector<double>>& B,
-              vector<vector<double>>& C,
-              vector<vector<double>>& D,
-              vector<double>& J,
-              vector<double>& E,
-              int& nextVariable) override {
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
         double conductance = 1.0 / value;
 
         if (node1 != 0) {
@@ -306,17 +306,72 @@ public:
     }
 };
 
+class Diode : public Component {
+    double threshold; // 0.0 for ideal diode, 0.7 for silicon
+
+public:
+    Diode(const string& n, int n1, int n2, double thresh)
+            : Component(DIODE, n, n1, n2, 0.0), threshold(thresh) {}
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>&,
+               vector<vector<double>>&,
+               vector<vector<double>>&,
+               vector<double>& J,
+               vector<double>&,
+               int&) override {
+        double conductance = 1e9; // Large conductance for ON state
+        double offConductance = 1e-9;
+
+        // Estimate voltage across diode
+        double v1 = (node1 == 0) ? 0 : 0.0;  // Assume 0V guess
+        double v2 = (node2 == 0) ? 0 : 0.0;
+        double v_d = v1 - v2;
+
+        double g = (v_d >= threshold) ? conductance : offConductance;
+
+        if (node1 != 0) {
+            G[node1 - 1][node1 - 1] += g;
+            if (node2 != 0) {
+                G[node1 - 1][node2 - 1] -= g;
+                G[node2 - 1][node1 - 1] -= g;
+            }
+        }
+        if (node2 != 0) {
+            G[node2 - 1][node2 - 1] += g;
+        }
+    }
+
+    double getCurrent(const vector<double>& nodeVoltages) const override {
+        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1 - 1];
+        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2 - 1];
+        double v_d = v1 - v2;
+        double g = (v_d >= threshold) ? 1e9 : 1e-9;
+        return g * (v_d - threshold);
+    }
+};
+
+class Ground : public Component {
+public:
+    Ground(const string& n, int node) : Component(GROUND, n, node, 0, 0.0) {}
+
+    void stamp(vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&,
+               vector<double>&, vector<double>&, int&) override {
+        // No need to stamp anything explicitly. Ground is node 0.
+    }
+};
+
 class VoltageSource : public Component {
 public:
     VoltageSource(const string& n, int n1, int n2, double val) : Component(VOLTAGE_SOURCE, n, n1, n2, val) {}
 
     void stamp(vector<vector<double>>& G,
-              vector<vector<double>>& B,
-              vector<vector<double>>& C,
-              vector<vector<double>>& D,
-              vector<double>& J,
-              vector<double>& E,
-              int& nextVariable) override {
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
         int vsIndex = nextVariable++;
 
         if (node1 != 0) B[node1-1][vsIndex] = 1;
@@ -335,12 +390,12 @@ public:
     Capacitor(const string& n, int n1, int n2, double val) : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0) {}
 
     void stamp(vector<vector<double>>& G,
-              vector<vector<double>>& B,
-              vector<vector<double>>& C,
-              vector<vector<double>>& D,
-              vector<double>& J,
-              vector<double>& E,
-              int& nextVariable) override {
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
         double geq = value / Circuit::getTimeStep();
 
         if (node1 != 0) {
@@ -374,46 +429,52 @@ public:
 };
 
 class Inductor : public Component {
-    double current;
-    double prevVoltage;
+    double current;       // Current through the inductor at previous time step
+    int index;            // Index in the matrix for the inductor current
+
 public:
     Inductor(const string& n, int n1, int n2, double val)
-        : Component(INDUCTOR, n, n1, n2, val), current(0.0), prevVoltage(0.0) {}
+            : Component(INDUCTOR, n, n1, n2, val), current(0.0), index(-1) {}
 
     void stamp(vector<vector<double>>& G,
-              vector<vector<double>>& B,
-              vector<vector<double>>& C,
-              vector<vector<double>>& D,
-              vector<double>& J,
-              vector<double>& E,
-              int& nextVariable) override {
-        double dt = Circuit::getTimeStep();
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        index = nextVariable++;
 
-        double geq = dt / (2.0 * value);
-        double ieq = current + (dt / (2.0 * value)) * prevVoltage;
+        double dt = Circuit::getTimeStep();
+        double L = value;
+
+        // KVL: v = L di/dt → di/dt = (v1 - v2) / L
+        // Use backward Euler: i(t) = i(t-1) + (v1 - v2) * dt / L
+        // Introduce auxiliary current variable: iL
+        // v1 - v2 - L * (iL - iL_prev) / dt = 0
+        // => v1 - v2 - L/dt * iL + L/dt * iL_prev = 0
+
+        double Leq = L / dt;
+        double Ieq = current;
 
         if (node1 != 0) {
-            G[node1-1][node1-1] += geq;
-            if (node2 != 0) {
-                G[node1-1][node2-1] -= geq;
-                G[node2-1][node1-1] -= geq;
-            }
+            B[node1 - 1][index] = 1;
+            C[index][node1 - 1] = 1;
         }
         if (node2 != 0) {
-            G[node2-1][node2-1] += geq;
+            B[node2 - 1][index] = -1;
+            C[index][node2 - 1] = -1;
         }
 
-        if (node1 != 0) J[node1-1] -= ieq;
-        if (node2 != 0) J[node2-1] += ieq;
+        D[index][index] = -Leq;
+        E[index] = -Leq * Ieq;
     }
 
     void update(double dt, const vector<double>& nodeVoltages) override {
-        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
-        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
-        double voltage = v1 - v2;
-
-        current += (dt / (2.0 * value)) * (voltage + prevVoltage);
-        prevVoltage = voltage;
+        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1 - 1];
+        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2 - 1];
+        double voltageAcross = v1 - v2;
+        current += voltageAcross * dt / value;
     }
 
     double getCurrent(const vector<double>& nodeVoltages) const override {
@@ -426,12 +487,12 @@ public:
     CurrentSource(const string& n, int n1, int n2, double val) : Component(CURRENT_SOURCE, n, n1, n2, val) {}
 
     void stamp(vector<vector<double>>& G,
-              vector<vector<double>>& B,
-              vector<vector<double>>& C,
-              vector<vector<double>>& D,
-              vector<double>& J,
-              vector<double>& E,
-              int& nextVariable) override {
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
         if (node1 != 0) J[node1-1] -= value;
         if (node2 != 0) J[node2-1] += value;
     }
@@ -439,11 +500,9 @@ public:
 
 double Circuit::currentTimeStep = 0.0;
 
-void plotVoltageTimeGraph(SDL_Renderer* renderer,
-                         const vector<double>& voltages,
-                         const vector<double>& times,
-                         int width, int height,
-                         int margin = 50) {
+void plotVoltageTimeGraph(SDL_Renderer* renderer,const vector<double>& voltages,const vector<double>& times,int width, int height,int margin = 50)
+
+{
     if (voltages.empty() || times.empty() || voltages.size() != times.size()) {
         SDL_Log("Plotting error: No valid data to display");
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
@@ -511,7 +570,8 @@ int main(int argc, char* argv[]) {
 
         if (type == "analyze") {
             break;
-        } else if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I") {
+        }
+        else if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I") {
             cin >> n1 >> n2 >> val;
             if (type == "V") {
                 VCount++;
@@ -519,17 +579,33 @@ int main(int argc, char* argv[]) {
             } else if (type == "R") {
                 RCount++;
                 circuit.addComponent(new Resistor("R" + to_string(RCount), n1, n2, val));
-            } else if (type == "C") {
+            }
+            else if (type == "G") {
+                cin >> n1;
+                circuit.addComponent(new Ground("GND", n1));
+            }
+            else if (type == "D" || type == "Z") {
+                cin >> n1 >> n2;
+                static int DCount = 0;
+                DCount++;
+                double threshold = (type == "D") ? 0.0 : 0.7;
+                circuit.addComponent(new Diode("D" + to_string(DCount), n1, n2, threshold));
+            }
+
+            else if (type == "C") {
                 CCount++;
                 circuit.addComponent(new Capacitor("C" + to_string(CCount), n1, n2, val));
-            } else if (type == "L") {
+            }
+            else if (type == "L") {
                 LCount++;
                 circuit.addComponent(new Inductor("L" + to_string(LCount), n1, n2, val));
-            } else if (type == "I") {
+            }
+            else if (type == "I") {
                 ICount++;
                 circuit.addComponent(new CurrentSource("I" + to_string(ICount), n1, n2, val));
             }
-        } else {
+        }
+        else {
             cout << "Unknown component type: " << type << "\n";
             cin.ignore(numeric_limits<streamsize>::max(), '\n');
         }
@@ -558,10 +634,10 @@ int main(int argc, char* argv[]) {
         }
 
         SDL_Window* window = SDL_CreateWindow("Voltage vs Time Graph",
-                                            SDL_WINDOWPOS_CENTERED,
-                                            SDL_WINDOWPOS_CENTERED,
-                                            800, 600,
-                                            SDL_WINDOW_SHOWN);
+                                              SDL_WINDOWPOS_CENTERED,
+                                              SDL_WINDOWPOS_CENTERED,
+                                              800, 600,
+                                              SDL_WINDOW_SHOWN);
         if (!window) {
             cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << endl;
             SDL_Quit();
