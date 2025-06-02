@@ -49,6 +49,7 @@ class Circuit {
     vector<Component*> components;
     int maxNode;
     static double currentTimeStep;
+    static double currentTime;
 
 public:
     Circuit() : maxNode(0) {}
@@ -213,15 +214,6 @@ public:
 
         int numVars = numNodes + numVSources + numInductors;
 
-        for (auto comp : components) {
-            if (comp->type == INDUCTOR) {
-                //dynamic_cast<Inductor*>(comp)->current = 0.0; // Start with 0 current
-            }
-            if (comp->type == CAPACITOR) {
-                //dynamic_cast<Capacitor*>(comp)->prevVoltage = 0.0; // Start with 0 voltage
-            }
-        }
-
         while (t <= tStop) {
             vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
             vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
@@ -231,7 +223,7 @@ public:
             vector<double> E(numVSources + numInductors, 0.0);
 
             int vsCount = 0;
-            int indCount = 0;
+            currentTime = t;
             for (auto comp : components) {
                 comp->stamp(G, B, C, D, J, E, vsCount);
             }
@@ -283,6 +275,8 @@ public:
     }
 
     static double getTimeStep() { return currentTimeStep; }
+
+    static double getTime() { return currentTime; }
 };
 
 class Resistor : public Component {
@@ -398,8 +392,10 @@ public:
 
 class Capacitor : public Component {
     double prevVoltage;
+    double current;  // Track the current through the capacitor
 public:
-    Capacitor(const string& n, int n1, int n2, double val) : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0) {}
+    Capacitor(const string& n, int n1, int n2, double val)
+        : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0), current(0.0) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>& B,
@@ -429,13 +425,13 @@ public:
     void update(double dt, const vector<double>& nodeVoltages) override {
         double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
         double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
-        prevVoltage = v1 - v2;
+        double voltage = v1 - v2;
+        // Calculate current based on voltage change
+        current = value * (voltage - prevVoltage) / dt;
+        prevVoltage = voltage;
     }
 
     double getCurrent(const vector<double>& nodeVoltages) const override {
-        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
-        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
-        double current = value * ((v1 - v2) - prevVoltage) / Circuit::getTimeStep();
         return current;
     }
 };
@@ -510,7 +506,50 @@ public:
     }
 };
 
+class ACVoltageSource : public Component {
+    double amplitude;
+    double frequency;
+    double phase; // in degrees
+    double offset;
+public:
+    ACVoltageSource(const string& n, int n1, int n2, double amp, double freq, double ph = 0.0, double off = 0.0)
+        : Component(VOLTAGE_SOURCE, n, n1, n2, 0.0),
+          amplitude(amp), frequency(freq), phase(ph), offset(off) {}
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        int vsIndex = nextVariable++;
+
+        if (node1 != 0) B[node1-1][vsIndex] = 1;
+        if (node2 != 0) B[node2-1][vsIndex] = -1;
+
+        if (node1 != 0) C[vsIndex][node1-1] = 1;
+        if (node2 != 0) C[vsIndex][node2-1] = -1;
+
+        // For DC analysis, we'll just use the offset value
+        if (Circuit::getTimeStep() == 0.0) {
+            E[vsIndex] = offset;
+        } else {
+            // For transient analysis, we calculate the instantaneous value
+            double t = Circuit::getTime();
+            double radians = phase * M_PI / 180.0;
+            E[vsIndex] = offset + amplitude * sin(2 * M_PI * frequency * t + radians);
+        }
+    }
+
+    double getVoltageAtTime(double t) const {
+        double radians = phase * M_PI / 180.0;
+        return offset + amplitude * sin(2 * M_PI * frequency * t + radians);
+    }
+};
+
 double Circuit::currentTimeStep = 0.0;
+double Circuit::currentTime = 0.0;
 
 void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector<double>& data2, const vector<double>& Vtimes, const vector<double>& Itimes, int width, int height, int margin = 50) {
     if (Vtimes.empty() || (data1.empty() && data2.empty())) {
@@ -595,7 +634,9 @@ int main(int argc, char* argv[]) {
     double val;
 
     cout << "Circuit Simulator\n";
-    cout << "Format: Type(V,R,C,L,I,D) node1 node2 value\n";
+    cout << "Format: Type(V,R,C,L,I) node1 node2 value\n";
+    cout << "Format: Type(D) node\n";
+    cout << "Format: Type(AC) node1 node2 amp freq (phase) (offset)\n";
     cout << "Type 'analyze' to run simulation.\n";
 
     while (true) {
@@ -604,12 +645,14 @@ int main(int argc, char* argv[]) {
         if (type == "analyze") {
             break;
         }
-        else if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I" || type == "D") {
-            cin >> n1 >> n2 >> val;
+
+        if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I" || type == "D" || type == "AC") {
             if (type == "V") {
+                cin >> n1 >> n2 >> val;
                 VCount++;
                 circuit.addComponent(new VoltageSource("V" + to_string(VCount), n1, n2, val));
             } else if (type == "R") {
+                cin >> n1 >> n2 >> val;
                 RCount++;
                 circuit.addComponent(new Resistor("R" + to_string(RCount), n1, n2, val));
             }
@@ -618,20 +661,32 @@ int main(int argc, char* argv[]) {
                 circuit.addComponent(new Ground("GND", n1));
             }
             else if (type == "D") {
+                cin >> n1 >> n2 >> val;
                 DCount++;
                 circuit.addComponent(new Diode("D" + to_string(DCount), n1, n2, val));
             }
             else if (type == "C") {
+                cin >> n1 >> n2 >> val;
                 CCount++;
                 circuit.addComponent(new Capacitor("C" + to_string(CCount), n1, n2, val));
             }
             else if (type == "L") {
+                cin >> n1 >> n2 >> val;
                 LCount++;
                 circuit.addComponent(new Inductor("L" + to_string(LCount), n1, n2, val));
             }
             else if (type == "I") {
+                cin >> n1 >> n2 >> val;
                 ICount++;
                 circuit.addComponent(new CurrentSource("I" + to_string(ICount), n1, n2, val));
+            }
+            else if (type == "AC") {
+                double amp, freq, phase = 0.0, offset = 0.0;
+                cin >> n1 >> n2 >> amp >> freq;
+                if (cin.peek() != '\n') cin >> phase;
+                if (cin.peek() != '\n') cin >> offset;
+                VCount++;
+                circuit.addComponent(new ACVoltageSource("AC" + to_string(VCount), n1, n2, amp, freq, phase, offset));
             }
         }
         else {
@@ -640,7 +695,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Ask user what to plot
     char choice;
     cout << "What would you like to plot? (V)oltage, (C)urrent, or (B)oth? ";
     cin >> choice;
