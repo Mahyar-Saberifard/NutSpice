@@ -21,6 +21,60 @@ enum ComponentType {
     GROUND
 };
 
+
+
+
+double parseSpiceValue(const string& valStr) {
+    if (valStr.empty()) return 0.0;
+
+
+    bool isNumber = true;
+    bool hasDot = false;
+    for (char c : valStr) {
+        if (c == '.' && !hasDot) {
+            hasDot = true;
+        } else if (!isdigit(c) && c != '-') {
+            isNumber = false;
+            break;
+        }
+    }
+
+    if (isNumber) {
+        return stod(valStr);
+    }
+
+
+    size_t suffixPos = 0;
+    while (suffixPos < valStr.size() &&
+           (isdigit(valStr[suffixPos]) || valStr[suffixPos] == '.' || valStr[suffixPos] == '-')) {
+        suffixPos++;
+    }
+
+    if (suffixPos == 0) {
+        return 0.0;
+    }
+
+    double num = stod(valStr.substr(0, suffixPos));
+    string suffix = valStr.substr(suffixPos);
+
+    transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
+
+    if (suffix == "t") return num * 1e12;
+    if (suffix == "g") return num * 1e9;
+    if (suffix == "meg") return num * 1e6;
+    if (suffix == "k") return num * 1e3;
+    if (suffix == "m") return num * 1e-3;
+    if (suffix == "u") return num * 1e-6;
+    if (suffix == "n") return num * 1e-9;
+    if (suffix == "p") return num * 1e-12;
+    if (suffix == "f") return num * 1e-15;
+
+    return num;
+}
+
+
+
+
 class Component {
 public:
     ComponentType type;
@@ -630,12 +684,12 @@ void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector
 int main(int argc, char* argv[]) {
     Circuit circuit;
     string type;
-    static int n1, n2, VCount = 0, RCount = 0, CCount = 0, LCount = 0, ICount = 0, DCount = 0, JCount = 0, ECount = 0;
-    double val;
+    static int n1, n2, VCount = 0, RCount = 0, CCount = 0, LCount = 0, ICount = 0, DCount = 0;
+    string valStr;
 
     cout << "Circuit Simulator\n";
-    cout << "Format: Type(V,R,C,L,I) node1 node2 value\n";
-    cout << "Format: Type(D) node\n";
+    cout << "Format: Type(V,R,C,L,I,D) node1 node2 value\n";
+    cout << "Format: Type(G) node\n";
     cout << "Format: Type(AC) node1 node2 amp freq (phase) (offset)\n";
     cout << "Type 'analyze' to run simulation.\n";
 
@@ -646,47 +700,50 @@ int main(int argc, char* argv[]) {
             break;
         }
 
-        if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I" || type == "D" || type == "AC") {
+        if (type == "V" || type == "R" || type == "C" || type == "L" || type == "I" || type == "D" || type == "AC" || type == "G") {
             if (type == "V") {
-                cin >> n1 >> n2 >> val;
+                cin >> n1 >> n2 >> valStr;
                 VCount++;
-                circuit.addComponent(new VoltageSource("V" + to_string(VCount), n1, n2, val));
-            } else if (type == "R") {
-                cin >> n1 >> n2 >> val;
+                circuit.addComponent(new VoltageSource("V" + to_string(VCount), n1, n2, parseSpiceValue(valStr)));
+            }
+            else if (type == "R") {
+                cin >> n1 >> n2 >> valStr;
                 RCount++;
-                circuit.addComponent(new Resistor("R" + to_string(RCount), n1, n2, val));
+                circuit.addComponent(new Resistor("R" + to_string(RCount), n1, n2, parseSpiceValue(valStr)));
             }
             else if (type == "G") {
                 cin >> n1;
                 circuit.addComponent(new Ground("GND", n1));
             }
             else if (type == "D") {
-                cin >> n1 >> n2 >> val;
+                cin >> n1 >> n2 >> valStr;
                 DCount++;
-                circuit.addComponent(new Diode("D" + to_string(DCount), n1, n2, val));
+                circuit.addComponent(new Diode("D" + to_string(DCount), n1, n2, parseSpiceValue(valStr)));
             }
             else if (type == "C") {
-                cin >> n1 >> n2 >> val;
+                cin >> n1 >> n2 >> valStr;
                 CCount++;
-                circuit.addComponent(new Capacitor("C" + to_string(CCount), n1, n2, val));
+                circuit.addComponent(new Capacitor("C" + to_string(CCount), n1, n2, parseSpiceValue(valStr)));
             }
             else if (type == "L") {
-                cin >> n1 >> n2 >> val;
+                cin >> n1 >> n2 >> valStr;
                 LCount++;
-                circuit.addComponent(new Inductor("L" + to_string(LCount), n1, n2, val));
+                circuit.addComponent(new Inductor("L" + to_string(LCount), n1, n2, parseSpiceValue(valStr)));
             }
             else if (type == "I") {
-                cin >> n1 >> n2 >> val;
+                cin >> n1 >> n2 >> valStr;
                 ICount++;
-                circuit.addComponent(new CurrentSource("I" + to_string(ICount), n1, n2, val));
+                circuit.addComponent(new CurrentSource("I" + to_string(ICount), n1, n2, parseSpiceValue(valStr)));
             }
             else if (type == "AC") {
-                double amp, freq, phase = 0.0, offset = 0.0;
-                cin >> n1 >> n2 >> amp >> freq;
-                if (cin.peek() != '\n') cin >> phase;
-                if (cin.peek() != '\n') cin >> offset;
+                string ampStr, freqStr, phaseStr = "0", offsetStr = "0";
+                cin >> n1 >> n2 >> ampStr >> freqStr;
+                if (cin.peek() != '\n') cin >> phaseStr;
+                if (cin.peek() != '\n') cin >> offsetStr;
                 VCount++;
-                circuit.addComponent(new ACVoltageSource("AC" + to_string(VCount), n1, n2, amp, freq, phase, offset));
+                circuit.addComponent(new ACVoltageSource("AC" + to_string(VCount), n1, n2,
+                                                         parseSpiceValue(ampStr), parseSpiceValue(freqStr),
+                                                         parseSpiceValue(phaseStr), parseSpiceValue(offsetStr)));
             }
         }
         else {
@@ -694,6 +751,7 @@ int main(int argc, char* argv[]) {
             cin.ignore(numeric_limits<streamsize>::max(), '\n');
         }
     }
+
 
     char choice;
     cout << "What would you like to plot? (V)oltage, (C)urrent, or (B)oth? ";
@@ -754,9 +812,7 @@ int main(int argc, char* argv[]) {
             SDL_Quit();
             return 1;
         }
-
         plotGraph(renderer, voltages, currents, Vtimes, Itimes, 800, 600);
-
         SDL_Event e;
         bool quit = false;
         while (!quit) {
@@ -767,11 +823,9 @@ int main(int argc, char* argv[]) {
             }
             SDL_Delay(100);
         }
-
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
         SDL_Quit();
     }
-
     return 0;
 }
