@@ -21,13 +21,8 @@ enum ComponentType {
     GROUND
 };
 
-
-
-
 double parseSpiceValue(const string& valStr) {
     if (valStr.empty()) return 0.0;
-
-
     bool isNumber = true;
     bool hasDot = false;
     for (char c : valStr) {
@@ -42,7 +37,6 @@ double parseSpiceValue(const string& valStr) {
     if (isNumber) {
         return stod(valStr);
     }
-
 
     size_t suffixPos = 0;
     while (suffixPos < valStr.size() &&
@@ -71,9 +65,6 @@ double parseSpiceValue(const string& valStr) {
 
     return num;
 }
-
-
-
 
 class Component {
 public:
@@ -367,7 +358,7 @@ public:
 };
 
 class Diode : public Component {
-    double threshold; // 0.0 for ideal diode, 0.7 for silicon
+    double threshold;
 
 public:
     Diode(const string& n, int n1, int n2, double thresh)
@@ -380,11 +371,10 @@ public:
                vector<double>& J,
                vector<double>&,
                int&) override {
-        double conductance = 1e9; // Large conductance for ON state
+        double conductance = 1e9;
         double offConductance = 1e-9;
 
-        // Estimate voltage across diode
-        double v1 = (node1 == 0) ? 0 : 0.0;  // Assume 0V guess
+        double v1 = (node1 == 0) ? 0 : 0.0;
         double v2 = (node2 == 0) ? 0 : 0.0;
         double v_d = v1 - v2;
 
@@ -417,7 +407,6 @@ public:
 
     void stamp(vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&,
                vector<double>&, vector<double>&, int&) override {
-        // No need to stamp anything explicitly. Ground is node 0.
     }
 };
 
@@ -446,7 +435,7 @@ public:
 
 class Capacitor : public Component {
     double prevVoltage;
-    double current;  // Track the current through the capacitor
+    double current;
 public:
     Capacitor(const string& n, int n1, int n2, double val)
         : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0), current(0.0) {}
@@ -491,8 +480,8 @@ public:
 };
 
 class Inductor : public Component {
-    double current;       // Current through the inductor at previous time step
-    int index;            // Index in the matrix for the inductor current
+    double current;
+    int index;
 
 public:
     Inductor(const string& n, int n1, int n2, double val)
@@ -585,11 +574,9 @@ public:
         if (node1 != 0) C[vsIndex][node1-1] = 1;
         if (node2 != 0) C[vsIndex][node2-1] = -1;
 
-        // For DC analysis, we'll just use the offset value
         if (Circuit::getTimeStep() == 0.0) {
             E[vsIndex] = offset;
         } else {
-            // For transient analysis, we calculate the instantaneous value
             double t = Circuit::getTime();
             double radians = phase * M_PI / 180.0;
             E[vsIndex] = offset + amplitude * sin(2 * M_PI * frequency * t + radians);
