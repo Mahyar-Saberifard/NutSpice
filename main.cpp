@@ -894,48 +894,106 @@ int main(int argc, char* argv[]) {
 
     cout << "Circuit Simulator - OOP Project Phase 1\n";
     cout << "Available commands:\n";
-    cout << "  add <component_type><name> <node1> <node2> <value>\n";
-    cout << "  delete <component_type><name>\n";
+    cout << "  add R<name> <node1> <node2> <value> - Add resistor\n";
+    cout << "  add C<name> <node1> <node2> <value> - Add capacitor\n";
+    cout << "  add L<name> <node1> <node2> <value> - Add inductor\n";
+    cout << "  add V<name> <node1> <node2> <value> - Add voltage source\n";
+    cout << "  add I<name> <node1> <node2> <value> - Add current source\n";
+    cout << "  add D<name> <node1> <node2> <model> - Add diode\n";
+    cout << "  add GND <node> - Add ground connection\n";
+    cout << "  delete R<name> - Delete resistor\n";
+    cout << "  delete C<name> - Delete capacitor\n";
+    cout << "  delete L<name> - Delete inductor\n";
+    cout << "  delete D<name> - Delete diode\n";
+    cout << "  delete GND <node> - Delete ground connection\n";
     cout << "  .nodes - List all nodes\n";
     cout << "  .list - List all components\n";
-    cout << "  .list <component_type> - List specific components\n";
+    cout << "  .list R - List resistors\n";
+    cout << "  .list C - List capacitors\n";
+    cout << "  .list L - List inductors\n";
+    cout << "  .list D - List diodes\n";
     cout << "  .rename node <old_name> <new_name> - Rename a node\n";
     cout << "  analyze - Run simulation\n";
     cout << "  exit - Quit program\n";
 
     while (true) {
         cout << ">>> ";
-        cin >> command;
+        getline(cin, command);
+        if (command.empty()) continue;
 
-        if (command == "analyze") {
+        istringstream iss(command);
+        string cmd;
+        iss >> cmd;
+
+        if (cmd == "analyze") {
             break;
         }
-        else if (command == "exit") {
+        else if (cmd == "exit") {
             return 0;
         }
-        else if (command == ".nodes") {
-            // Implement node listing
+        else if (cmd == ".nodes") {
+            auto nodes = circuit.listNodes();
             cout << "Available nodes:\n";
-            // You'll need to track nodes separately for this
-            cout << "n001, n002, GND\n"; // Example output
+            for (const auto& node : nodes) {
+                cout << node << "\n";
+            }
         }
-        else if (command == ".list") {
-            // Implement component listing
-            cout << "List of all components:\n";
-            // You'll need to track components for this
-            cout << "R1 n001 n002 1000\n"; // Example output
-        }
-        else if (command == "add") {
-            string typeName, node1, node2, valStr;
-            cin >> typeName >> node1 >> node2 >> valStr;
+        else if (cmd == ".list") {
+            string filter;
+            if (iss >> filter) {
+                ComponentType filterType = static_cast<ComponentType>(-1);
+                if (filter == "R") filterType = RESISTOR;
+                else if (filter == "C") filterType = CAPACITOR;
+                else if (filter == "L") filterType = INDUCTOR;
+                else if (filter == "D") filterType = DIODE;
 
-            // Extract component type and name
-            char typeChar = typeName[0];
+                auto components = circuit.listComponents(filterType);
+                cout << "List of components:\n";
+                for (const auto& comp : components) {
+                    cout << comp << "\n";
+                }
+            } else {
+                auto components = circuit.listComponents();
+                cout << "List of all components:\n";
+                for (const auto& comp : components) {
+                    cout << comp << "\n";
+                }
+            }
+        }
+        else if (cmd == "add") {
+            string typeName;
+            iss >> typeName;
+
+            if (typeName.empty()) {
+                cout << "ERROR: Invalid syntax\n";
+                continue;
+            }
+
+            char typeChar = toupper(typeName[0]);
             string name = typeName.substr(1);
 
             try {
-                int n1 = stoi(node1.substr(1)); // Extract number from "n001" format
-                int n2 = stoi(node2.substr(1));
+                if (typeChar == 'G' && toupper(typeName[1]) == 'N' && toupper(typeName[2]) == 'D') {
+                    // Handle ground connection
+                    string node;
+                    if (!(iss >> node)) {
+                        cout << "ERROR: Missing node for ground connection\n";
+                        continue;
+                    }
+                    int n = getOrCreateNode(node);
+                    circuit.addComponent(new Ground("GND", n));
+                    cout << "SUCCESS: Ground connection added to node " << node << "\n";
+                    continue;
+                }
+
+                string node1, node2, valStr;
+                if (!(iss >> node1 >> node2 >> valStr)) {
+                    cout << "ERROR: Missing parameters\n";
+                    continue;
+                }
+
+                int n1 = getOrCreateNode(node1);
+                int n2 = getOrCreateNode(node2);
                 double value = parseSpiceValue(valStr);
 
                 // Validate value
@@ -946,83 +1004,103 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                switch (toupper(typeChar)) {
+                switch (typeChar) {
                     case 'R':
                         circuit.addComponent(new Resistor(name, n1, n2, value));
-                        cout << "SUCCESS: Resistor " << name << " added\n";
+                        cout << "SUCCESS: Resistor " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
                         break;
                     case 'C':
                         circuit.addComponent(new Capacitor(name, n1, n2, value));
-                        cout << "SUCCESS: Capacitor " << name << " added\n";
+                        cout << "SUCCESS: Capacitor " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
                         break;
                     case 'L':
                         circuit.addComponent(new Inductor(name, n1, n2, value));
-                        cout << "SUCCESS: Inductor " << name << " added\n";
+                        cout << "SUCCESS: Inductor " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
                         break;
                     case 'V':
                         circuit.addComponent(new VoltageSource(name, n1, n2, value));
-                        cout << "SUCCESS: Voltage source " << name << " added\n";
+                        cout << "SUCCESS: Voltage source " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
                         break;
                     case 'I':
                         circuit.addComponent(new CurrentSource(name, n1, n2, value));
-                        cout << "SUCCESS: Current source " << name << " added\n";
+                        cout << "SUCCESS: Current source " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
                         break;
                     case 'D':
                         circuit.addComponent(new Diode(name, n1, n2, 0.7)); // Default threshold
-                        cout << "SUCCESS: Diode " << name << " added\n";
-                        break;
-                    case 'G':
-                        if (node1 == "GND") {
-                            circuit.addComponent(new Ground(name, 0));
-                            cout << "SUCCESS: Ground added\n";
-                        } else {
-                            cout << "ERROR: Ground must be connected to node GND\n";
-                        }
+                        cout << "SUCCESS: Diode " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
                         break;
                     default:
                         cout << "ERROR: Unknown component type '" << typeChar << "'\n";
                 }
             } catch (const exception& e) {
                 cout << "ERROR: Invalid input format\n";
-                cin.ignore(numeric_limits<streamsize>::max(), '\n');
             }
         }
-        else if (command == "delete") {
+        else if (cmd == "delete") {
             string typeName;
-            cin >> typeName;
+            if (!(iss >> typeName)) {
+                cout << "ERROR: Missing component type\n";
+                continue;
+            }
 
-            char typeChar = typeName[0];
+            char typeChar = toupper(typeName[0]);
             string name = typeName.substr(1);
 
-            // You'll need to implement component deletion in your Circuit class
-            bool success = false; // circuit.deleteComponent(typeChar, name);
+            if (typeChar == 'G' && toupper(typeName[1]) == 'N' && toupper(typeName[2]) == 'D') {
+                // Handle ground deletion
+                string node;
+                if (!(iss >> node)) {
+                    cout << "ERROR: Missing node for ground deletion\n";
+                    continue;
+                }
+                bool success = circuit.deleteComponent('G', "GND");
+                if (success) {
+                    cout << "SUCCESS: Ground connection removed\n";
+                } else {
+                    cout << "ERROR: Ground connection not found\n";
+                }
+                continue;
+            }
 
+            bool success = circuit.deleteComponent(typeChar, name);
             if (success) {
                 cout << "SUCCESS: Component " << typeName << " deleted\n";
             } else {
-                cout << "ERROR: Cannot delete " << typeChar << name << "; component not found\n";
+                cout << "ERROR: Cannot delete " << typeName << "; component not found\n";
             }
         }
-        else if (command == ".rename") {
+        else if (cmd == ".rename") {
             string subcmd, oldName, newName;
-            cin >> subcmd >> oldName >> newName;
+            if (!(iss >> subcmd >> oldName >> newName)) {
+                cout << "ERROR: Invalid syntax - correct format: .rename node <old_name> <new_name>\n";
+                continue;
+            }
 
             if (subcmd == "node") {
-                // You'll need to implement node renaming
-                bool success = false; // circuit.renameNode(oldName, newName);
-
+                bool success = circuit.renameNode(oldName, newName);
                 if (success) {
                     cout << "SUCCESS: Node renamed from " << oldName << " to " << newName << "\n";
                 } else {
-                    cout << "ERROR: Node " << oldName << " does not exist in the circuit\n";
+                    if (oldName == "GND" || oldName == "0" || newName == "GND" || newName == "0") {
+                        cout << "ERROR: Cannot rename ground node\n";
+                    } else if (nodeMap.find(newName) != nodeMap.end()) {
+                        cout << "ERROR: Node name " << newName << " already exists\n";
+                    } else {
+                        cout << "ERROR: Node " << oldName << " does not exist\n";
+                    }
                 }
             } else {
                 cout << "ERROR: Invalid syntax - correct format: .rename node <old_name> <new_name>\n";
             }
         }
         else {
-            cout << "ERROR: Unknown command '" << command << "'\n";
-            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "ERROR: Unknown command '" << cmd << "'\n";
         }
     }
 
