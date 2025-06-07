@@ -27,7 +27,6 @@ enum ComponentType {
     CC_CS
 };
 
-// Node management
 unordered_map<string, int> nodeMap;
 unordered_map<int, string> reverseNodeMap;
 int nextNodeNumber = 1;
@@ -51,7 +50,6 @@ string getNodeName(int nodeNumber) {
 double parseSpiceValue(const string& valStr) {
     if (valStr.empty()) return 0.0;
 
-    // Check if it's a simple number
     bool isNumber = true;
     bool hasDot = false;
     bool hasE = false;
@@ -63,8 +61,8 @@ double parseSpiceValue(const string& valStr) {
             hasDot = true;
         } else if ((c == 'e' || c == 'E') && !hasE) {
             hasE = true;
-            hasDot = false; // After E, we can have another dot
-            hasSign = false; // And another sign
+            hasDot = false;
+            hasSign = false;
         } else if ((c == '+' || c == '-') && (i == 0 || hasE)) {
             hasSign = true;
         } else if (!isdigit(c)) {
@@ -205,12 +203,12 @@ public:
         }
 
         if (nodeMap.find(newName) != nodeMap.end()) {
-            return false; // New name already exists
+            return false;
         }
 
         auto it = nodeMap.find(oldName);
         if (it == nodeMap.end()) {
-            return false; // Old name doesn't exist
+            return false;
         }
 
         int nodeNum = it->second;
@@ -280,17 +278,22 @@ public:
         return x;
     }
 
-    void analyzeDC() {
+void analyzeDC() {
         int numNodes = maxNode;
         int numVSources = 0;
         int numInductors = 0;
 
         for (auto comp : components) {
-            if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE || comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
+            if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
+                comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
             if (comp->type == INDUCTOR) numInductors++;
         }
 
         int numVars = numNodes + numVSources + numInductors;
+        if (numVars == 0) {
+            cout << "No variables to solve for in DC analysis" << endl;
+            return;
+        }
 
         vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
         vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
@@ -298,6 +301,10 @@ public:
         vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
         vector<double> J(numNodes, 0.0);
         vector<double> E(numVSources + numInductors, 0.0);
+
+        for (int i = 0; i < numNodes; i++) {
+            G[i][i] = 1e-12;
+        }
 
         int vsCount = 0;
         int indCount = 0;
@@ -330,7 +337,9 @@ public:
             for (int j = 0; j < numVSources + numInductors; j++) {
                 A[i][numNodes + j] = B[i][j];
             }
+            b[i] = J[i];
         }
+
         for (int i = 0; i < numVSources + numInductors; i++) {
             for (int j = 0; j < numNodes; j++) {
                 A[numNodes + i][j] = C[i][j];
@@ -338,24 +347,36 @@ public:
             for (int j = 0; j < numVSources + numInductors; j++) {
                 A[numNodes + i][numNodes + j] = D[i][j];
             }
-        }
-
-        for (int i = 0; i < numNodes; i++) {
-            b[i] = J[i];
-        }
-        for (int i = 0; i < numVSources + numInductors; i++) {
             b[numNodes + i] = E[i];
         }
 
-        vector<double> x = solveSystem(A, b);
+        try {
+            vector<double> x = solveSystem(A, b);
 
-        cout << "\nDC Analysis Results:\n";
-        cout << "-------------------\n";
-        for (int i = 0; i < numNodes; i++) {
-            cout << "Node " << getNodeName(i+1) << " voltage: " << x[i] << " V\n";
-        }
-        for (int i = 0; i < numVSources; i++) {
-            cout << "Current through voltage source " << (i+1) << ": " << x[numNodes + i] << " A\n";
+            cout << "\nDC Analysis Results:\n";
+            cout << "-------------------\n";
+            cout << "Node Voltages:\n";
+            for (int i = 0; i < numNodes; i++) {
+                cout << "  Node " << getNodeName(i+1) << ": " << fixed << setprecision(6) << x[i] << " V\n";
+            }
+
+            if (numVSources > 0) {
+                cout << "\nCurrents through Voltage Sources:\n";
+                for (int i = 0; i < numVSources; i++) {
+                    cout << "  Source " << (i+1) << ": " << fixed << setprecision(6) << x[numNodes + i] << " A\n";
+                }
+            }
+
+            cout << "\nCurrents through Resistors:\n";
+            for (auto comp : components) {
+                if (comp->type == RESISTOR) {
+                    double current = comp->getCurrent(x);
+                    cout << "  " << comp->name << ": " << fixed << setprecision(6) << current << " A\n";
+                }
+            }
+
+        } catch (const runtime_error& e) {
+            cerr << "Error in DC analysis: " << e.what() << endl;
         }
     }
 
@@ -578,11 +599,16 @@ public:
 };
 
 class Diode : public Component {
-    double threshold;
+    double Is;
+    double Vt;
+    double n;
+    double current;
+    double lastVoltage;
 
 public:
-    Diode(const string& n, int n1, int n2, double thresh)
-            : Component(DIODE, n, n1, n2, 0.0), threshold(thresh) {}
+    Diode(const string& n, int n1, int n2)
+        : Component(DIODE, n, n1, n2, 0.0),
+          Is(1e-14), Vt(0.026), n(1.0), current(0.0), lastVoltage(0.0) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>&,
@@ -591,33 +617,37 @@ public:
                vector<double>& J,
                vector<double>&,
                int&) override {
-        double conductance = 1e9;
-        double offConductance = 1e-9;
-
-        double v1 = (node1 == 0) ? 0 : 0.0;
-        double v2 = (node2 == 0) ? 0 : 0.0;
-        double v_d = v1 - v2;
-
-        double g = (v_d >= threshold) ? conductance : offConductance;
+        double vd = lastVoltage;
+        double g = (Is/(n*Vt)) * exp(vd/(n*Vt));
+        double Ieq = Is*(exp(vd/(n*Vt)) - 1) - g*vd;
 
         if (node1 != 0) {
-            G[node1 - 1][node1 - 1] += g;
+            G[node1-1][node1-1] += g;
             if (node2 != 0) {
-                G[node1 - 1][node2 - 1] -= g;
-                G[node2 - 1][node1 - 1] -= g;
+                G[node1-1][node2-1] -= g;
+                G[node2-1][node1-1] -= g;
             }
+            J[node1-1] -= Ieq;
         }
         if (node2 != 0) {
-            G[node2 - 1][node2 - 1] += g;
+            G[node2-1][node2-1] += g;
+            J[node2-1] += Ieq;
         }
     }
 
+    void update(double dt, const vector<double>& nodeVoltages) override {
+        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
+        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
+        lastVoltage = v1 - v2;
+        current = Is * (exp(lastVoltage/(n*Vt)) - 1);
+    }
+
     double getCurrent(const vector<double>& nodeVoltages) const override {
-        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1 - 1];
-        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2 - 1];
-        double v_d = v1 - v2;
-        double g = (v_d >= threshold) ? 1e9 : 1e-9;
-        return g * (v_d - threshold);
+        return current;
+    }
+
+    string getInfo() const override {
+        return "Diode " + name + " " + getNodeName(node1) + " " + getNodeName(node2);
     }
 };
 
@@ -655,7 +685,7 @@ public:
 class SinVoltageSource : public Component {
     double amplitude;
     double frequency;
-    double phase; // in degrees
+    double phase;
     double offset;
 public:
     SinVoltageSource(const string& n, int n1, int n2, double amp, double freq, double ph = 0.0, double off = 0.0)
@@ -851,8 +881,8 @@ void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector
     SDL_RenderClear(renderer);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin); // X-axis
-    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin); // Y-axis
+    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin);
+    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin);
 
     for (double t = minTime; t <= maxTime; t += (maxTime - minTime) / 5) {
         int x = margin + static_cast<int>((t - minTime) * scaleX);
@@ -887,9 +917,118 @@ void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector
     SDL_RenderPresent(renderer);
 }
 
+void processCircuitFile(const string& filename, Circuit& circuit) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        cerr << "Error: Could not open file " << filename << endl;
+        return;
+    }
+
+    string line;
+    while (getline(file, line)) {
+        if (line.empty() || line[0] == '*') continue;
+
+        istringstream iss(line);
+        string type, name, node1, node2, valStr;
+        iss >> type >> name >> node1 >> node2;
+
+        if (type.empty()) continue;
+
+        try {
+            char typeChar = toupper(type[0]);
+            if (typeChar == 'G' && type.size() >= 3 &&
+                toupper(type[1]) == 'N' && toupper(type[2]) == 'D') {
+                circuit.addComponent(new Ground("GND", getOrCreateNode(node1)));
+                cout << "Added ground connection to node " << node1 << endl;
+                continue;
+            }
+
+            iss >> valStr;
+            double value = parseSpiceValue(valStr);
+            int n1 = getOrCreateNode(node1);
+            int n2 = getOrCreateNode(node2);
+
+            switch(typeChar) {
+                case 'R':
+                    circuit.addComponent(new Resistor(name, n1, n2, value));
+                    break;
+                case 'C':
+                    circuit.addComponent(new Capacitor(name, n1, n2, value));
+                    break;
+                case 'L':
+                    circuit.addComponent(new Inductor(name, n1, n2, value));
+                    break;
+                case 'V':
+                    if (type.size() > 1 && toupper(type[1]) == 'S') {
+                        double dc, amp, freq, phase = 0.0;
+                        if (!(iss >> dc >> amp >> freq)) {
+                            cerr << "Error: Invalid sinusoidal source parameters" << endl;
+                            continue;
+                        }
+                        if (iss >> phase) {}
+                        circuit.addComponent(new SinVoltageSource(name, n1, n2, amp, freq, phase, dc));
+                    } else if (type.size() > 1 && toupper(type[1]) == 'P') {
+                        double v1, v2, td, tr, tf, pw, per;
+                        if (!(iss >> v1 >> v2 >> td >> tr >> tf >> pw >> per)) {
+                            cerr << "Error: Invalid pulse source parameters" << endl;
+                            continue;
+                        }
+                        circuit.addComponent(new PulseVoltageSource(name, n1, n2, v1, v2, td, tr, tf, pw, per));
+                    } else {
+                        circuit.addComponent(new VoltageSource(name, n1, n2, value));
+                    }
+                    break;
+                case 'I':
+                    circuit.addComponent(new CurrentSource(name, n1, n2, value));
+                    break;
+                case 'D':
+                    circuit.addComponent(new Diode(name, n1, n2));
+                    break;
+                default:
+                    cerr << "Error: Unknown component type " << type << endl;
+            }
+            cout << "Added component: " << line << endl;
+        } catch (const exception& e) {
+            cerr << "Error processing line: " << line << " - " << e.what() << endl;
+        }
+    }
+    file.close();
+}
+
+void printTransientResults(const vector<double>& times, const vector<double>& voltages,
+                          const vector<double>& currents, int numNodes) {
+    cout << "\nTransient Analysis Results:\n";
+    cout << "--------------------------\n";
+    cout << "Time (s)\t";
+
+    for (int i = 0; i < numNodes; i++) {
+        cout << "Node " << getNodeName(i+1) << " (V)\t";
+    }
+    cout << "Currents (A)\n";
+
+    size_t steps = min(times.size(), voltages.size() / numNodes);
+    for (size_t step = 0; step < steps; step++) {
+        cout << fixed << setprecision(6) << times[step] << "\t";
+
+        for (int node = 0; node < numNodes; node++) {
+            cout << voltages[step * numNodes + node] << "\t";
+        }
+
+        if (step < currents.size()) {
+            cout << currents[step];
+        }
+        cout << "\n";
+    }
+}
+
 int main(int argc, char* argv[]) {
     Circuit circuit;
     string command;
+
+    if (argc > 1) {
+        processCircuitFile(argv[1], circuit);
+    }
+
     static int VCount = 0, RCount = 0, CCount = 0, LCount = 0, ICount = 0, DCount = 0;
 
     cout << "Circuit Simulator - OOP Project Phase 1\n";
@@ -901,6 +1040,8 @@ int main(int argc, char* argv[]) {
     cout << "  add I<name> <node1> <node2> <value> - Add current source\n";
     cout << "  add D<name> <node1> <node2> <model> - Add diode\n";
     cout << "  add GND <node> - Add ground connection\n";
+    cout << "  add VS<name> <node1> <node2> <DC> <AMP> <FREQ> [PHASE] - Add sinusoidal voltage source\n";
+    cout << "  add VP<name> <node1> <node2> <V1> <V2> <TD> <TR> <TF> <PW> <PER> - Add pulse voltage source\n";
     cout << "  delete R<name> - Delete resistor\n";
     cout << "  delete C<name> - Delete capacitor\n";
     cout << "  delete L<name> - Delete inductor\n";
@@ -913,7 +1054,10 @@ int main(int argc, char* argv[]) {
     cout << "  .list L - List inductors\n";
     cout << "  .list D - List diodes\n";
     cout << "  .rename node <old_name> <new_name> - Rename a node\n";
+    cout << "  load <filename> - Load circuit from file\n";
     cout << "  analyze - Run simulation\n";
+    cout << "  analyze DC - Run DC analysis\n";
+    cout << "  analyze TRAN <tstep> <tstop> - Run transient analysis\n";
     cout << "  exit - Quit program\n";
 
     while (true) {
@@ -925,7 +1069,30 @@ int main(int argc, char* argv[]) {
         string cmd;
         iss >> cmd;
 
-        if (cmd == "analyze") {
+        if (cmd == "load") {
+            string filename;
+            if (iss >> filename) {
+                processCircuitFile(filename, circuit);
+            } else {
+                cout << "ERROR: Missing filename\n";
+            }
+        }
+        else if (cmd == "analyze") {
+            string analysisType;
+            iss >> analysisType;
+
+            if (analysisType.empty() || toupper(analysisType[0]) == 'D') {
+                circuit.analyzeDC();
+            }
+            else if (toupper(analysisType[0]) == 'T') {
+                double tStep, tStop;
+                if (!(iss >> tStep >> tStop)) {
+                    cout << "ERROR: Missing time parameters for transient analysis\n";
+                    continue;
+                }
+                circuit.analyzeTransient(tStep, tStop);
+                printTransientResults(Vtimes, voltages, currents, circuit.listNodes().size() - 1);
+            }
             break;
         }
         else if (cmd == "exit") {
@@ -974,7 +1141,6 @@ int main(int argc, char* argv[]) {
 
             try {
                 if (typeChar == 'G' && toupper(typeName[1]) == 'N' && toupper(typeName[2]) == 'D') {
-                    // Handle ground connection
                     string node;
                     if (!(iss >> node)) {
                         cout << "ERROR: Missing node for ground connection\n";
@@ -994,9 +1160,32 @@ int main(int argc, char* argv[]) {
 
                 int n1 = getOrCreateNode(node1);
                 int n2 = getOrCreateNode(node2);
+
+                if (typeName.size() > 1 && toupper(typeName[1]) == 'S') {
+                    double dc, amp, freq, phase = 0.0;
+                    if (!(iss >> dc >> amp >> freq)) {
+                        cout << "ERROR: Missing parameters for sinusoidal source\n";
+                        continue;
+                    }
+                    if (iss >> phase) {}
+                    circuit.addComponent(new SinVoltageSource(name, n1, n2, amp, freq, phase, dc));
+                    cout << "SUCCESS: Sinusoidal voltage source " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
+                    continue;
+                } else if (typeName.size() > 1 && toupper(typeName[1]) == 'P') {
+                    double v1, v2, td, tr, tf, pw, per;
+                    if (!(iss >> v1 >> v2 >> td >> tr >> tf >> pw >> per)) {
+                        cout << "ERROR: Missing parameters for pulse source\n";
+                        continue;
+                    }
+                    circuit.addComponent(new PulseVoltageSource(name, n1, n2, v1, v2, td, tr, tf, pw, per));
+                    cout << "SUCCESS: Pulse voltage source " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
+                    continue;
+                }
+
                 double value = parseSpiceValue(valStr);
 
-                // Validate value
                 if ((typeChar == 'R' || typeChar == 'C' || typeChar == 'L') && value <= 0) {
                     cout << "ERROR: " << (typeChar == 'R' ? "Resistance" :
                                          typeChar == 'C' ? "Capacitance" : "Inductance")
@@ -1031,7 +1220,7 @@ int main(int argc, char* argv[]) {
                              << node1 << " and " << node2 << "\n";
                         break;
                     case 'D':
-                        circuit.addComponent(new Diode(name, n1, n2, 0.7)); // Default threshold
+                        circuit.addComponent(new Diode(name, n1, n2));
                         cout << "SUCCESS: Diode " << name << " added between "
                              << node1 << " and " << node2 << "\n";
                         break;
@@ -1053,7 +1242,6 @@ int main(int argc, char* argv[]) {
             string name = typeName.substr(1);
 
             if (typeChar == 'G' && toupper(typeName[1]) == 'N' && toupper(typeName[2]) == 'D') {
-                // Handle ground deletion
                 string node;
                 if (!(iss >> node)) {
                     cout << "ERROR: Missing node for ground deletion\n";
