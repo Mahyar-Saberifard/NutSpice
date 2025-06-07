@@ -380,6 +380,8 @@ void analyzeDC() {
         }
     }
 
+
+
     void analyzeTransient(double tStep, double tStop) {
         currentTimeStep = tStep;
         double t = 0.0;
@@ -464,6 +466,7 @@ void analyzeDC() {
             t += tStep;
         }
     }
+
 
     static double getTimeStep() { return currentTimeStep; }
     static double getTime() { return currentTime; }
@@ -1021,6 +1024,49 @@ void printTransientResults(const vector<double>& times, const vector<double>& vo
     }
 }
 
+void loadFromFile(Circuit& circuit, const string& filename) {
+    ifstream infile(filename);
+    if (!infile) {
+        cerr << "Error: Cannot open file " << filename << endl;
+        return;
+    }
+
+    string line;
+    while (getline(infile, line)) {
+        if (line.empty() || line[0] == '*') continue; // Skip empty lines and comments
+
+        istringstream iss(line);
+        string name, n1_str, n2_str, value_str;
+        iss >> name >> n1_str >> n2_str >> value_str;
+
+        int n1 = getOrCreateNode(n1_str);
+        int n2 = getOrCreateNode(n2_str);
+        double value = parseSpiceValue(value_str);
+
+        char type = toupper(name[0]);
+        switch (type) {
+            case 'R':
+                circuit.addComponent(new Resistor(name, n1, n2, value));
+                break;
+            case 'C':
+                circuit.addComponent(new Capacitor(name, n1, n2, value));
+                break;
+            case 'L':
+                circuit.addComponent(new Inductor(name, n1, n2, value));
+                break;
+            case 'V':
+                // You need to define a VoltageSource class like Resistor
+                // Placeholder:
+                // circuit.addComponent(new VoltageSource(name, n1, n2, value));
+                break;
+            default:
+                cerr << "Unknown component: " << name << endl;
+                break;
+        }
+    }
+}
+
+
 int main(int argc, char* argv[]) {
     Circuit circuit;
     string command;
@@ -1072,7 +1118,7 @@ int main(int argc, char* argv[]) {
         if (cmd == "load") {
             string filename;
             if (iss >> filename) {
-                processCircuitFile(filename, circuit);
+               loadFromFile( circuit,filename);
             } else {
                 cout << "ERROR: Missing filename\n";
             }
