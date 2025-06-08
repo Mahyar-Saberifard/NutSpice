@@ -1066,7 +1066,6 @@ void loadFromFile(Circuit& circuit, const string& filename) {
     }
 }
 
-
 int main(int argc, char* argv[]) {
     Circuit circuit;
     string command;
@@ -1118,7 +1117,7 @@ int main(int argc, char* argv[]) {
         if (cmd == "load") {
             string filename;
             if (iss >> filename) {
-               loadFromFile( circuit,filename);
+               processCircuitFile( filename,circuit);
             } else {
                 cout << "ERROR: Missing filename\n";
             }

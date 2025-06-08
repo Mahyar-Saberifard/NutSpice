@@ -1,0 +1,11 @@
+R1 1 2 1k
+R1 1 2 1k
+R2 1 2 1k
+C1 2 0 1u
+C1 2 0 1u
+C2 2 0 1u
+V1 1 0 5
+V1 1 0 5
+V2 1 0 5
+hvhbhbj
+analyze DC
