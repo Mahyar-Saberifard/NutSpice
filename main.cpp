@@ -1,7 +1,38 @@
 #include <bits/stdc++.h>
 #include <SDL2/SDL.h>
+#include <windows.h>
+#include <direct.h>
 
 using namespace std;
+
+#ifdef _WIN32
+#include <direct.h>
+#define GETCWD _getcwd
+#define CHDIR _chdir
+#else
+#include <unistd.h>
+#define GETCWD getcwd
+#define CHDIR chdir
+#define MAX_PATH PATH_MAX
+#endif
+
+void changeToPreviousDirectory() {
+    char currentDir[MAX_PATH];
+    if (GETCWD(currentDir, sizeof(currentDir)) == NULL) {
+        cerr << "Error getting current directory" << endl;
+        return;
+    }
+
+    // Go up one directory level
+    if (CHDIR("..") != 0) {
+        cerr << "Error changing to parent directory" << endl;
+        return;
+    }
+
+    char newDir[MAX_PATH];
+    GETCWD(newDir, sizeof(newDir));
+    cout << "Changed to directory: " << newDir << endl;
+}
 
 vector<double> voltages;
 vector<double> currents;
@@ -164,7 +195,41 @@ public:
         }
     }
 
+    // Add these error checking functions to the Circuit class
+    bool hasComponent(const string& name) const {
+        for (const auto& comp : components) {
+            if (comp->name == name) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool hasGround() const {
+        for (const auto& comp : components) {
+            if (comp->type == GROUND) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void addComponent(Component* comp) {
+        // Check for duplicate names
+        if (hasComponent(comp->name)) {
+            throw runtime_error("Error: Component " + comp->name + " already exists in the circuit");
+        }
+
+        // Check for invalid values
+        if ((comp->type == RESISTOR || comp->type == CAPACITOR || comp->type == INDUCTOR) &&
+            comp->value <= 0) {
+            string typeStr;
+            if (comp->type == RESISTOR) typeStr = "Resistor";
+            else if (comp->type == CAPACITOR) typeStr = "Capacitor";
+            else typeStr = "Inductor";
+            throw runtime_error("Error: " + typeStr + " value must be positive");
+            }
+
         components.push_back(comp);
         if (comp->node1 > maxNode) maxNode = comp->node1;
         if (comp->node2 > maxNode) maxNode = comp->node2;
@@ -278,7 +343,7 @@ public:
         return x;
     }
 
-void analyzeDC() {
+    void analyzeDC() {
         int numNodes = maxNode;
         int numVSources = 0;
         int numInductors = 0;
@@ -302,14 +367,15 @@ void analyzeDC() {
         vector<double> J(numNodes, 0.0);
         vector<double> E(numVSources + numInductors, 0.0);
 
+        // Add small conductance to diagonal to prevent singular matrix
         for (int i = 0; i < numNodes; i++) {
             G[i][i] = 1e-12;
         }
 
         int vsCount = 0;
-        int indCount = 0;
         for (auto comp : components) {
             if (comp->type == INDUCTOR) {
+                // Treat inductor as small resistor for DC analysis
                 double conductance = 1.0 / 1e-12;
 
                 if (comp->node1 != 0) {
@@ -327,26 +393,19 @@ void analyzeDC() {
             }
         }
 
+        // Build the complete system matrix
         vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
         vector<double> b(numVars, 0.0);
 
         for (int i = 0; i < numNodes; i++) {
-            for (int j = 0; j < numNodes; j++) {
-                A[i][j] = G[i][j];
-            }
-            for (int j = 0; j < numVSources + numInductors; j++) {
-                A[i][numNodes + j] = B[i][j];
-            }
+            for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
+            for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
             b[i] = J[i];
         }
 
         for (int i = 0; i < numVSources + numInductors; i++) {
-            for (int j = 0; j < numNodes; j++) {
-                A[numNodes + i][j] = C[i][j];
-            }
-            for (int j = 0; j < numVSources + numInductors; j++) {
-                A[numNodes + i][numNodes + j] = D[i][j];
-            }
+            for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
+            for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
             b[numNodes + i] = E[i];
         }
 
@@ -356,6 +415,7 @@ void analyzeDC() {
             cout << "\nDC Analysis Results:\n";
             cout << "-------------------\n";
             cout << "Node Voltages:\n";
+            cout << "  Node GND: 0.000000 V\n"; // Explicitly show ground at 0V
             for (int i = 0; i < numNodes; i++) {
                 cout << "  Node " << getNodeName(i+1) << ": " << fixed << setprecision(6) << x[i] << " V\n";
             }
@@ -380,93 +440,142 @@ void analyzeDC() {
         }
     }
 
-
-
     void analyzeTransient(double tStep, double tStop) {
-        currentTimeStep = tStep;
-        double t = 0.0;
+    currentTimeStep = tStep;
+    double t = 0.0;
 
-        voltages.clear();
-        currents.clear();
-        Vtimes.clear();
-        Itimes.clear();
+    voltages.clear();
+    currents.clear();
+    Vtimes.clear();
+    Itimes.clear();
 
-        if (maxNode < 1) {
-            cerr << "Error: Circuit must have at least one non-ground node" << endl;
-            return;
+    if (!hasGround()) {
+        throw runtime_error("Error: No ground node detected in the circuit");
+    }
+
+    if (maxNode < 1) {
+        throw runtime_error("Error: Circuit must have at least one non-ground node");
+    }
+
+    int numNodes = maxNode;
+    int numVSources = 0;
+    int numInductors = 0;
+
+    for (auto comp : components) {
+        if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
+            comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
+        if (comp->type == INDUCTOR) numInductors++;
+    }
+
+    int numVars = numNodes + numVSources + numInductors;
+
+    while (t <= tStop) {
+        vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
+        vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
+        vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
+        vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
+        vector<double> J(numNodes, 0.0);
+        vector<double> E(numVSources + numInductors, 0.0);
+
+        // Add small conductance to diagonal to prevent singular matrix
+        for (int i = 0; i < numNodes; i++) {
+            G[i][i] = 1e-12;
         }
 
-        int numNodes = maxNode;
-        int numVSources = 0;
-        int numInductors = 0;
-
+        int vsCount = 0;
+        currentTime = t;
         for (auto comp : components) {
-            if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE || comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
-            if (comp->type == INDUCTOR) numInductors++;
+            comp->stamp(G, B, C, D, J, E, vsCount);
         }
 
-        int numVars = numNodes + numVSources + numInductors;
-
-        while (t <= tStop) {
-            vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
-            vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
-            vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
-            vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
-            vector<double> J(numNodes, 0.0);
-            vector<double> E(numVSources + numInductors, 0.0);
-
-            int vsCount = 0;
-            currentTime = t;
-            for (auto comp : components) {
-                comp->stamp(G, B, C, D, J, E, vsCount);
-            }
+        vector<double> x;
+        try {
+            vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
+            vector<double> b(numVars, 0.0);
 
             for (int i = 0; i < numNodes; i++) {
-                G[i][i] += 1e-12;
+                for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
+                for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
+                b[i] = J[i];
+            }
+            for (int i = 0; i < numVSources + numInductors; i++) {
+                for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
+                for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
+                b[numNodes + i] = E[i];
             }
 
-            vector<double> x;
-            try {
-                vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
-                vector<double> b(numVars, 0.0);
+            x = solveSystem(A, b);
 
-                for (int i = 0; i < numNodes; i++) {
-                    for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
-                    for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
-                    b[i] = J[i];
-                }
-                for (int i = 0; i < numVSources + numInductors; i++) {
-                    for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
-                    for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
-                    b[numNodes + i] = E[i];
-                }
-
-                x = solveSystem(A, b);
-            } catch (const runtime_error& e) {
-                cerr << "Error at t=" << t << ": " << e.what() << endl;
-                break;
-            }
-
-            for (auto comp : components) {
-                comp->update(tStep, x);
-            }
-
+            // Store voltages for each node at this time step
             for (int i = 0; i < numNodes; i++) {
                 Vtimes.push_back(t);
                 voltages.push_back(x[i]);
             }
 
+            // Store currents for each component at this time step
             for (auto comp : components) {
-                if (comp->type == RESISTOR || comp->type == CAPACITOR || comp->type == INDUCTOR || comp->type == DIODE) {
+                if (comp->type == RESISTOR || comp->type == CAPACITOR ||
+                    comp->type == INDUCTOR || comp->type == DIODE) {
                     Itimes.push_back(t);
                     currents.push_back(comp->getCurrent(x));
                 }
             }
 
-            t += tStep;
+        } catch (const runtime_error& e) {
+            cerr << "Error at t=" << t << ": " << e.what() << endl;
+            break;
+        }
+
+        for (auto comp : components) {
+            comp->update(tStep, x);
+        }
+
+        t += tStep;
+    }
+}
+
+    void printTransientResults(const vector<double>& times, const vector<double>& voltages,
+                      const vector<double>& currents, int numNodes) {
+        cout << "\nTransient Analysis Results:\n";
+        cout << "--------------------------\n";
+
+        // Print node voltages header
+        cout << "Time (s)\t";
+        cout << "Node GND (V)\t";
+        for (int i = 0; i < numNodes; i++) {
+            cout << "Node " << getNodeName(i+1) << " (V)\t";
+        }
+
+        // Print component currents header
+        cout << "Component Currents (A)\n";
+
+        size_t numTimeSteps = times.size() / numNodes;
+        size_t currentIndex = 0;
+
+        for (size_t step = 0; step < numTimeSteps; step++) {
+            // Print time
+            cout << fixed << setprecision(6) << times[step * numNodes] << "\t";
+
+            // Print node voltages (GND is always 0)
+            cout << "0.000000\t";
+            for (int node = 0; node < numNodes; node++) {
+                cout << voltages[step * numNodes + node] << "\t";
+            }
+
+            // Print component currents
+            for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
+                auto comp = components[compIdx];
+                if (comp->type == RESISTOR || comp->type == CAPACITOR ||
+                    comp->type == INDUCTOR || comp->type == DIODE) {
+                    if (currentIndex < currents.size()) {
+                        cout << comp->name << ": " << currents[currentIndex] << "\t";
+                        currentIndex++;
+                    }
+                    }
+            }
+            cout << "\n";
         }
     }
-
 
     static double getTimeStep() { return currentTimeStep; }
     static double getTime() { return currentTime; }
@@ -844,8 +953,10 @@ public:
     }
 };
 
-void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector<double>& data2, const vector<double>& Vtimes, const vector<double>& Itimes, int width, int height, int margin = 50) {
-    if (Vtimes.empty() || (data1.empty() && data2.empty())) {
+void plotGraph(SDL_Renderer* renderer, const vector<double>& Vtimes, const vector<double>& Itimes,
+               const vector<double>& nodeVoltages, const vector<double>& compCurrents,
+               const Circuit& circuit, int width, int height, int margin = 50) {
+    if (Vtimes.empty() || (nodeVoltages.empty() && compCurrents.empty())) {
         SDL_Log("Plotting error: No valid data to display");
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderClear(renderer);
@@ -853,67 +964,133 @@ void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector
         return;
     }
 
-    double minY1 = data1.empty() ? 0 : *min_element(data1.begin(), data1.end());
-    double maxY1 = data1.empty() ? 0 : *max_element(data1.begin(), data1.end());
-    double minY2 = data2.empty() ? 0 : *min_element(data2.begin(), data2.end());
-    double maxY2 = data2.empty() ? 0 : *max_element(data2.begin(), data2.end());
-    double minTime = Vtimes.front();
-    double maxTime = Vtimes.back();
-
-    if (maxY1 == minY1) { maxY1 += 1; minY1 -= 1; }
-    if (maxY2 == minY2) { maxY2 += 1; minY2 -= 1; }
-
-    double yRange1 = maxY1 - minY1;
-    double yRange2 = maxY2 - minY2;
-    maxY1 += yRange1 * 0.1;
-    minY1 -= yRange1 * 0.1;
-    maxY2 += yRange2 * 0.1;
-    minY2 -= yRange2 * 0.1;
-
-    double minY = showVoltage ? minY1 : minY2;
-    double maxY = showVoltage ? maxY1 : maxY2;
-    if (showVoltage && showCurrent) {
-        minY = min(minY1, minY2);
-        maxY = max(maxY1, maxY2);
+    // Get number of nodes and components
+    int numNodes = circuit.listNodes().size() - 1; // exclude ground
+    int numComps = 0;
+    for (const auto& comp : circuit.listComponents()) {
+        if (comp.find("Resistor") != string::npos ||
+            comp.find("Capacitor") != string::npos ||
+            comp.find("Inductor") != string::npos ||
+            comp.find("Diode") != string::npos) {
+            numComps++;
+        }
     }
 
+    // Find min/max values for scaling
+    double minTime = min(Vtimes.empty() ? 0 : Vtimes.front(), Itimes.empty() ? 0 : Itimes.front());
+    double maxTime = max(Vtimes.empty() ? 0 : Vtimes.back(), Itimes.empty() ? 0 : Itimes.back());
+
+    double minVoltage = nodeVoltages.empty() ? 0 : *min_element(nodeVoltages.begin(), nodeVoltages.end());
+    double maxVoltage = nodeVoltages.empty() ? 0 : *max_element(nodeVoltages.begin(), nodeVoltages.end());
+
+    double minCurrent = compCurrents.empty() ? 0 : *min_element(compCurrents.begin(), compCurrents.end());
+    double maxCurrent = compCurrents.empty() ? 0 : *max_element(compCurrents.begin(), compCurrents.end());
+
+    // Add some padding to the ranges
+    double voltageRange = maxVoltage - minVoltage;
+    double currentRange = maxCurrent - minCurrent;
+    maxVoltage += voltageRange * 0.1;
+    minVoltage -= voltageRange * 0.1;
+    maxCurrent += currentRange * 0.1;
+    minCurrent -= currentRange * 0.1;
+
+    // Determine what to show and overall Y range
+    double minY, maxY;
+    if (showVoltage && showCurrent) {
+        minY = min(minVoltage, minCurrent);
+        maxY = max(maxVoltage, maxCurrent);
+    } else if (showVoltage) {
+        minY = minVoltage;
+        maxY = maxVoltage;
+    } else {
+        minY = minCurrent;
+        maxY = maxCurrent;
+    }
+
+    // Calculate scaling factors
     double scaleX = (width - 2 * margin) / (maxTime - minTime);
     double scaleY = (height - 2 * margin) / (maxY - minY);
 
+    // Clear screen
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
 
+    // Draw axes
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin);
-    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin);
+    SDL_RenderDrawLine(renderer, margin, height - margin, width - margin, height - margin); // X-axis
+    SDL_RenderDrawLine(renderer, margin, height - margin, margin, margin); // Y-axis
 
+    // Draw time ticks and labels
     for (double t = minTime; t <= maxTime; t += (maxTime - minTime) / 5) {
         int x = margin + static_cast<int>((t - minTime) * scaleX);
         SDL_RenderDrawLine(renderer, x, height - margin - 5, x, height - margin + 5);
     }
 
+    // Draw Y ticks and labels
     for (double y = minY; y <= maxY; y += (maxY - minY) / 5) {
         int yPos = height - margin - static_cast<int>((y - minY) * scaleY);
         SDL_RenderDrawLine(renderer, margin - 5, yPos, margin + 5, yPos);
     }
 
-    if (showVoltage && !data1.empty()) {
-        SDL_SetRenderDrawColor(renderer, 0, 255, 100, 255);
-        for (size_t i = 0; i < data1.size(); ++i) {
-            int x = margin + static_cast<int>((Vtimes[i] - minTime) * scaleX);
-            int y = height - margin - static_cast<int>((data1[i] - minY) * scaleY);
-            SDL_RenderDrawLine(renderer, x-2, y, x+2, y);
-            SDL_RenderDrawLine(renderer, x, y-2, x, y+2);
+    // Plot node voltages if requested
+    if (showVoltage && !nodeVoltages.empty()) {
+        vector<SDL_Color> voltageColors = {
+            {0, 255, 0, 255},    // Green
+            {0, 255, 255, 255},  // Cyan
+            {255, 0, 255, 255},   // Magenta
+            {255, 255, 0, 255},   // Yellow
+            {0, 127, 255, 255},  // Blue-green
+            {255, 0, 127, 255}    // Pink
+        };
+
+        for (int node = 0; node < numNodes; node++) {
+            SDL_Color color = voltageColors[node % voltageColors.size()];
+            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+
+            // Each time step is duplicated for each node in Vtimes
+            for (size_t step = 0; step < Vtimes.size(); step += numNodes) {
+                int x = margin + static_cast<int>((Vtimes[step + node] - minTime) * scaleX);
+                int y = height - margin - static_cast<int>((nodeVoltages[step + node] - minY) * scaleY);
+
+                // Draw a small plus sign for each data point
+                SDL_RenderDrawLine(renderer, x-2, y, x+2, y);
+                SDL_RenderDrawLine(renderer, x, y-2, x, y+2);
+            }
         }
     }
 
-    if (showCurrent && !data2.empty()) {
-        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-        for (size_t i = 0; i < data2.size(); ++i) {
-            int x = margin + static_cast<int>((Itimes[i] - minTime) * scaleX);
-            int y = height - margin - static_cast<int>((data2[i] - minY) * scaleY);
-            SDL_RenderDrawLine(renderer, x-2, y-2, x+2, y+2);
-            SDL_RenderDrawLine(renderer, x-2, y+2, x+2, y-2);
+    // Plot component currents if requested
+    if (showCurrent && !compCurrents.empty()) {
+        vector<SDL_Color> currentColors = {
+            {255, 0, 0, 255},     // Red
+            {255, 127, 0, 255},   // Orange
+            {255, 0, 127, 255},   // Pink-red
+            {127, 0, 255, 255},   // Purple
+            {0, 127, 255, 255},   // Blue-green
+            {127, 255, 0, 255}    // Lime
+        };
+
+        int compIndex = 0;
+        for (const auto& comp : circuit.listComponents()) {
+            if (comp.find("Resistor") != string::npos ||
+                comp.find("Capacitor") != string::npos ||
+                comp.find("Inductor") != string::npos ||
+                comp.find("Diode") != string::npos) {
+
+                SDL_Color color = currentColors[compIndex % currentColors.size()];
+                SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+
+                // Each time step is duplicated for each component in Itimes
+                for (size_t step = 0; step < Itimes.size(); step += numComps) {
+                    int x = margin + static_cast<int>((Itimes[step + compIndex] - minTime) * scaleX);
+                    int y = height - margin - static_cast<int>((compCurrents[step + compIndex] - minY) * scaleY);
+
+                    // Draw a small X for each data point
+                    SDL_RenderDrawLine(renderer, x-2, y-2, x+2, y+2);
+                    SDL_RenderDrawLine(renderer, x-2, y+2, x+2, y-2);
+                }
+                compIndex++;
+            }
         }
     }
 
@@ -921,9 +1098,22 @@ void plotGraph(SDL_Renderer* renderer, const vector<double>& data1, const vector
 }
 
 void processCircuitFile(const string& filename, Circuit& circuit) {
-    ifstream file(filename);
+    char currentDir[MAX_PATH];
+    GETCWD(currentDir, sizeof(currentDir));
+
+    // Change to parent directory
+    if (CHDIR("..") != 0) {
+        cerr << "Warning: Couldn't change to parent directory" << endl;
+    }
+    ifstream file(filename.c_str());
     if (!file.is_open()) {
         cerr << "Error: Could not open file " << filename << endl;
+        cerr << "Current working directory: ";
+#ifdef _WIN32
+        system("cd");
+#else
+        system("pwd");
+#endif
         return;
     }
 
@@ -998,75 +1188,6 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
     file.close();
 }
 
-void printTransientResults(const vector<double>& times, const vector<double>& voltages,
-                          const vector<double>& currents, int numNodes) {
-    cout << "\nTransient Analysis Results:\n";
-    cout << "--------------------------\n";
-    cout << "Time (s)\t";
-
-    for (int i = 0; i < numNodes; i++) {
-        cout << "Node " << getNodeName(i+1) << " (V)\t";
-    }
-    cout << "Currents (A)\n";
-
-    size_t steps = min(times.size(), voltages.size() / numNodes);
-    for (size_t step = 0; step < steps; step++) {
-        cout << fixed << setprecision(6) << times[step] << "\t";
-
-        for (int node = 0; node < numNodes; node++) {
-            cout << voltages[step * numNodes + node] << "\t";
-        }
-
-        if (step < currents.size()) {
-            cout << currents[step];
-        }
-        cout << "\n";
-    }
-}
-
-void loadFromFile(Circuit& circuit, const string& filename) {
-    ifstream infile(filename);
-    if (!infile) {
-        cerr << "Error: Cannot open file " << filename << endl;
-        return;
-    }
-
-    string line;
-    while (getline(infile, line)) {
-        if (line.empty() || line[0] == '*') continue; // Skip empty lines and comments
-
-        istringstream iss(line);
-        string name, n1_str, n2_str, value_str;
-        iss >> name >> n1_str >> n2_str >> value_str;
-
-        int n1 = getOrCreateNode(n1_str);
-        int n2 = getOrCreateNode(n2_str);
-        double value = parseSpiceValue(value_str);
-
-        char type = toupper(name[0]);
-        switch (type) {
-            case 'R':
-                circuit.addComponent(new Resistor(name, n1, n2, value));
-                break;
-            case 'C':
-                circuit.addComponent(new Capacitor(name, n1, n2, value));
-                break;
-            case 'L':
-                circuit.addComponent(new Inductor(name, n1, n2, value));
-                break;
-            case 'V':
-                // You need to define a VoltageSource class like Resistor
-                // Placeholder:
-                // circuit.addComponent(new VoltageSource(name, n1, n2, value));
-                break;
-            default:
-                cerr << "Unknown component: " << name << endl;
-                break;
-        }
-    }
-}
-
-
 int main(int argc, char* argv[]) {
     Circuit circuit;
     string command;
@@ -1118,7 +1239,10 @@ int main(int argc, char* argv[]) {
         if (cmd == "load") {
             string filename;
             if (iss >> filename) {
-               loadFromFile( circuit,filename);
+                if (filename.find('.') == string::npos) {
+                    filename += ".txt";
+                }
+                processCircuitFile(filename, circuit);
             } else {
                 cout << "ERROR: Missing filename\n";
             }
@@ -1127,17 +1251,29 @@ int main(int argc, char* argv[]) {
             string analysisType;
             iss >> analysisType;
 
-            if (analysisType.empty() || toupper(analysisType[0]) == 'D') {
-                circuit.analyzeDC();
-            }
-            else if (toupper(analysisType[0]) == 'T') {
-                double tStep, tStop;
-                if (!(iss >> tStep >> tStop)) {
-                    cout << "ERROR: Missing time parameters for transient analysis\n";
-                    continue;
+            try {
+                if (!circuit.hasGround()) {
+                    throw runtime_error("No ground node detected in the circuit");
                 }
-                circuit.analyzeTransient(tStep, tStop);
-                printTransientResults(Vtimes, voltages, currents, circuit.listNodes().size() - 1);
+
+                if (analysisType.empty() || toupper(analysisType[0]) == 'D') {
+                    circuit.analyzeDC();
+                }
+                else if (toupper(analysisType[0]) == 'T') {
+                    double tStep, tStop;
+                    if (!(iss >> tStep >> tStop)) {
+                        cout << "ERROR: Missing time parameters for transient analysis\n";
+                        continue;
+                    }
+                    if (tStep <= 0 || tStop <= 0) {
+                        cout << "ERROR: Time parameters must be positive\n";
+                        continue;
+                    }
+                    circuit.analyzeTransient(tStep, tStop);
+                    circuit.printTransientResults(Vtimes, voltages, currents, circuit.listNodes().size() - 1);
+                }
+            } catch (const runtime_error& e) {
+                cout << "ERROR: " << e.what() << "\n";
             }
             break;
         }
@@ -1183,9 +1319,15 @@ int main(int argc, char* argv[]) {
             }
 
             char typeChar = toupper(typeName[0]);
-            string name = typeName.substr(1);
+            string name = typeName.substr(0);
 
             try {
+                // Check for duplicate name
+                if (circuit.hasComponent(name)) {
+                    cout << "ERROR: Component " << name << " already exists in the circuit\n";
+                    continue;
+                }
+
                 if (typeChar == 'G' && toupper(typeName[1]) == 'N' && toupper(typeName[2]) == 'D') {
                     string node;
                     if (!(iss >> node)) {
@@ -1397,7 +1539,7 @@ int main(int argc, char* argv[]) {
             SDL_Quit();
             return 1;
         }
-        plotGraph(renderer, voltages, currents, Vtimes, Itimes, 800, 600);
+        plotGraph(renderer, Vtimes, Itimes, voltages, currents, circuit, 800, 600);
         SDL_Event e;
         bool quit = false;
         while (!quit) {
