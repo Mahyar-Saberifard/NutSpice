@@ -1,4 +1,12 @@
-#include <bits/stdc++.h>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <unordered_map>
+#include <cmath>
+#include <algorithm>
+#include <iomanip>
+#include <stdexcept>
 #include <SDL2/SDL.h>
 #include <windows.h>
 #include <direct.h>
@@ -52,10 +60,12 @@ enum ComponentType {
     GROUND,
     SIN_VOLTAGE_SOURCE,
     PULSE_VOLTAGE_SOURCE,
-    VC_VS,
-    VC_CS,
-    CC_VS,
-    CC_CS
+    SIN_CURRENT_SOURCE,
+    PULSE_CURRENT_SOURCE,
+    VCVS_SOURCE,
+    VCCS_SOURCE,
+    CCCS_SOURCE,
+    CCVS_SOURCE,
 };
 
 unordered_map<string, int> nodeMap;
@@ -171,10 +181,10 @@ public:
             case GROUND: typeStr = "Ground"; break;
             case SIN_VOLTAGE_SOURCE: typeStr = "Sinusoidal Voltage Source"; break;
             case PULSE_VOLTAGE_SOURCE: typeStr = "Pulse Voltage Source"; break;
-            case VC_VS: typeStr = "VCVS"; break;
-            case VC_CS: typeStr = "VCCS"; break;
-            case CC_VS: typeStr = "CCVS"; break;
-            case CC_CS: typeStr = "CCCS"; break;
+            case VCVS_SOURCE: typeStr = "VCVS Source"; break;
+            case VCCS_SOURCE: typeStr = "VCCS Source"; break;
+            case CCVS_SOURCE: typeStr = "CCVS Source"; break;
+            case CCCS_SOURCE: typeStr = "CCCS Source"; break;
         }
         return typeStr + " " + name + " " + getNodeName(node1) + " " + getNodeName(node2) + " " + to_string(value);
     }
@@ -239,9 +249,14 @@ public:
         }
     }
 
-    bool deleteComponent(char typeChar, const string& name) {
+    bool deleteComponent(const string& fullName) {
+        if (fullName.empty()) return false;
+
+        char typeChar = toupper(fullName[0]);
+        string name = fullName;  // Keep full name like "R1"
+
         ComponentType type;
-        switch(toupper(typeChar)) {
+        switch (typeChar) {
             case 'R': type = RESISTOR; break;
             case 'C': type = CAPACITOR; break;
             case 'L': type = INDUCTOR; break;
@@ -259,6 +274,7 @@ public:
                 return true;
             }
         }
+
         return false;
     }
 
@@ -281,6 +297,26 @@ public:
         nodeMap[newName] = nodeNum;
         reverseNodeMap[nodeNum] = newName;
         return true;
+    }
+
+    bool renameComponent(const string& oldName, const string& newName) {
+        if (oldName == newName) {
+            return false; // No change
+        }
+
+        // Check if the new name already exists
+        if (hasComponent(newName)) {
+            return false; // Conflict
+        }
+
+        for (auto& comp : components) {
+            if (comp->name == oldName) {
+                comp->name = newName;
+                return true; // Success
+            }
+        }
+
+        return false; // Component with oldName not found
     }
 
     vector<string> listComponents(ComponentType filterType = static_cast<ComponentType>(-1)) const {
@@ -577,6 +613,126 @@ public:
         }
     }
 
+    void analyzeDCSweep(const string& sourceName, double start, double stop, double step) {
+        if (!hasGround()) {
+            throw runtime_error("Error: No ground node in the circuit");
+        }
+
+        Component* targetSource = nullptr;
+        for (auto comp : components) {
+            if ((comp->type == VOLTAGE_SOURCE || comp->type == CURRENT_SOURCE) && comp->name == sourceName) {
+                targetSource = comp;
+                break;
+            }
+        }
+
+        if (!targetSource) {
+            throw runtime_error("Error: Source " + sourceName + " not found or not sweepable");
+        }
+
+        vector<double> sweepPoints;
+        vector<vector<double>> results;
+
+        double value = start;
+        while ((step > 0 && value <= stop) || (step < 0 && value >= stop)) {
+            targetSource->value = value;
+            sweepPoints.push_back(value);
+
+            // Run DC analysis and capture node voltages
+            int numNodes = maxNode;
+            int numVSources = 0;
+            int numInductors = 0;
+
+            for (auto comp : components) {
+                if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
+                    comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
+                if (comp->type == INDUCTOR) numInductors++;
+            }
+
+            int numVars = numNodes + numVSources + numInductors;
+            if (numVars == 0) {
+                throw runtime_error("Error: No variables to solve in sweep analysis");
+            }
+
+            vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
+            vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
+            vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
+            vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
+            vector<double> J(numNodes, 0.0);
+            vector<double> E(numVSources + numInductors, 0.0);
+
+            for (int i = 0; i < numNodes; i++) {
+                G[i][i] = 1e-12;
+            }
+
+            int vsCount = 0;
+            for (auto comp : components) {
+                if (comp->type == INDUCTOR) {
+                    double conductance = 1.0 / 1e-12;
+                    if (comp->node1 != 0) {
+                        G[comp->node1 - 1][comp->node1 - 1] += conductance;
+                        if (comp->node2 != 0) {
+                            G[comp->node1 - 1][comp->node2 - 1] -= conductance;
+                            G[comp->node2 - 1][comp->node1 - 1] -= conductance;
+                        }
+                    }
+                    if (comp->node2 != 0) {
+                        G[comp->node2 - 1][comp->node2 - 1] += conductance;
+                    }
+                } else {
+                    comp->stamp(G, B, C, D, J, E, vsCount);
+                }
+            }
+
+            vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
+            vector<double> b(numVars, 0.0);
+
+            for (int i = 0; i < numNodes; i++) {
+                for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
+                for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
+                b[i] = J[i];
+            }
+
+            for (int i = 0; i < numVSources + numInductors; i++) {
+                for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
+                for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
+                b[numNodes + i] = E[i];
+            }
+
+            try {
+                vector<double> x = solveSystem(A, b);
+                results.push_back(x);
+            } catch (const runtime_error& e) {
+                cerr << "Sweep value " << value << ": " << e.what() << endl;
+                results.push_back(vector<double>(numVars, NAN));
+            }
+
+            value += step;
+        }
+
+        // Print Results
+        cout << "\nDC Sweep Analysis Results for " << sourceName << ":\n";
+        cout << "-------------------------------------\n";
+        cout << setw(15) << "Source (V/A)";
+        for (int i = 0; i < maxNode; ++i) {
+            cout << setw(15) << "V(" + getNodeName(i + 1) + ")";
+        }
+        cout << "\n";
+
+        for (size_t i = 0; i < sweepPoints.size(); ++i) {
+            cout << setw(15) << fixed << setprecision(6) << sweepPoints[i];
+            for (int j = 0; j < maxNode; ++j) {
+                double v = results[i][j];
+                if (isnan(v)) {
+                    cout << setw(15) << "NaN";
+                } else {
+                    cout << setw(15) << fixed << setprecision(6) << v;
+                }
+            }
+            cout << "\n";
+        }
+    }
+
     static double getTimeStep() { return currentTimeStep; }
     static double getTime() { return currentTime; }
 };
@@ -711,50 +867,70 @@ public:
 };
 
 class Diode : public Component {
-    double Is;
-    double Vt;
-    double n;
-    double current;
-    double lastVoltage;
+    const double Is;     // Reverse saturation current (A)
+    const double Vt;     // Thermal voltage (V)
+    const double n;      // Ideality factor
+    double lastVoltage;  // Last voltage across the diode
+    double current;      // Current through the diode
 
 public:
-    Diode(const string& n, int n1, int n2)
-        : Component(DIODE, n, n1, n2, 0.0),
-          Is(1e-14), Vt(0.026), n(1.0), current(0.0), lastVoltage(0.0) {}
+    Diode(const string& name, int node1, int node2)
+            : Component(DIODE, name, node1, node2, 0.0),
+              Is(1e-14), Vt(0.026), n(1.0),
+              lastVoltage(0.7), current(0.0) {}  // Start near forward voltage
 
     void stamp(vector<vector<double>>& G,
-               vector<vector<double>>&,
-               vector<vector<double>>&,
-               vector<vector<double>>&,
+               vector<vector<double>>& /*C*/,
+               vector<vector<double>>& /*B*/,
+               vector<vector<double>>& /*D*/,
                vector<double>& J,
-               vector<double>&,
-               int&) override {
-        double vd = lastVoltage;
-        double g = (Is/(n*Vt)) * exp(vd/(n*Vt));
-        double Ieq = Is*(exp(vd/(n*Vt)) - 1) - g*vd;
+               vector<double>& /*x*/,
+               int& /*matrixSize*/) override {
 
+        // Diode voltage
+        double vd = lastVoltage;
+
+        // Prevent overflow in exp()
+        double expArg = std::min(vd / (n * Vt), 40.0);
+        double expVd = exp(expArg);
+
+        // Conductance (dynamic resistance)
+        double g = (Is / (n * Vt)) * expVd;
+
+        // Equivalent current source
+        double Ieq = Is * (expVd - 1) - g * vd;
+
+        // Stamp conductance and current
         if (node1 != 0) {
-            G[node1-1][node1-1] += g;
             if (node2 != 0) {
-                G[node1-1][node2-1] -= g;
-                G[node2-1][node1-1] -= g;
+                G[node1 - 1][node1 - 1] += g;
+                G[node1 - 1][node2 - 1] -= g;
+                G[node2 - 1][node1 - 1] -= g;
+                G[node2 - 1][node2 - 1] += g;
+
+                J[node1 - 1] -= Ieq;
+                J[node2 - 1] += Ieq;
+            } else {
+                G[node1 - 1][node1 - 1] += g;
+                J[node1 - 1] -= Ieq;
             }
-            J[node1-1] -= Ieq;
-        }
-        if (node2 != 0) {
-            G[node2-1][node2-1] += g;
-            J[node2-1] += Ieq;
+        } else if (node2 != 0) {
+            G[node2 - 1][node2 - 1] += g;
+            J[node2 - 1] += Ieq;
         }
     }
 
     void update(double dt, const vector<double>& nodeVoltages) override {
-        double v1 = (node1 == 0) ? 0 : nodeVoltages[node1-1];
-        double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
+        double v1 = (node1 == 0) ? 0.0 : nodeVoltages[node1 - 1];
+        double v2 = (node2 == 0) ? 0.0 : nodeVoltages[node2 - 1];
         lastVoltage = v1 - v2;
-        current = Is * (exp(lastVoltage/(n*Vt)) - 1);
+
+        // Avoid overflow
+        double expArg = std::min(lastVoltage / (n * Vt), 40.0);
+        current = Is * (exp(expArg) - 1);
     }
 
-    double getCurrent(const vector<double>& nodeVoltages) const override {
+    double getCurrent(const vector<double>& /*nodeVoltages*/) const override {
         return current;
     }
 
@@ -878,65 +1054,6 @@ public:
     }
 };
 
-class VCVS : public Component {
-    int ctrlNode1, ctrlNode2;
-    double gain;
-public:
-    VCVS(const string& n, int n1, int n2, int cn1, int cn2, double g)
-        : Component(VC_VS, n, n1, n2, 0.0), ctrlNode1(cn1), ctrlNode2(cn2), gain(g) {}
-
-    void stamp(vector<vector<double>>& G,
-               vector<vector<double>>& B,
-               vector<vector<double>>& C,
-               vector<vector<double>>& D,
-               vector<double>& J,
-               vector<double>& E,
-               int& nextVariable) override {
-        int vsIndex = nextVariable++;
-
-        if (node1 != 0) B[node1-1][vsIndex] = 1;
-        if (node2 != 0) B[node2-1][vsIndex] = -1;
-
-        if (ctrlNode1 != 0) C[vsIndex][ctrlNode1-1] = gain;
-        if (ctrlNode2 != 0) C[vsIndex][ctrlNode2-1] = -gain;
-
-        D[vsIndex][vsIndex] = -1;
-    }
-
-    string getInfo() const override {
-        return "VCVS " + name + " " + getNodeName(node1) + " " + getNodeName(node2) +
-               " controlling nodes: " + getNodeName(ctrlNode1) + " " + getNodeName(ctrlNode2) +
-               " gain=" + to_string(gain);
-    }
-};
-
-class VCCS : public Component {
-    int ctrlNode1, ctrlNode2;
-    double gain;
-public:
-    VCCS(const string& n, int n1, int n2, int cn1, int cn2, double g)
-        : Component(VC_CS, n, n1, n2, 0.0), ctrlNode1(cn1), ctrlNode2(cn2), gain(g) {}
-
-    void stamp(vector<vector<double>>& G,
-               vector<vector<double>>&,
-               vector<vector<double>>&,
-               vector<vector<double>>&,
-               vector<double>&,
-               vector<double>&,
-               int&) override {
-        if (ctrlNode1 != 0 && node1 != 0) G[node1-1][ctrlNode1-1] += gain;
-        if (ctrlNode1 != 0 && node2 != 0) G[node2-1][ctrlNode1-1] -= gain;
-        if (ctrlNode2 != 0 && node1 != 0) G[node1-1][ctrlNode2-1] -= gain;
-        if (ctrlNode2 != 0 && node2 != 0) G[node2-1][ctrlNode2-1] += gain;
-    }
-
-    string getInfo() const override {
-        return "VCCS " + name + " " + getNodeName(node1) + " " + getNodeName(node2) +
-               " controlling nodes: " + getNodeName(ctrlNode1) + " " + getNodeName(ctrlNode2) +
-               " gain=" + to_string(gain);
-    }
-};
-
 class CurrentSource : public Component {
 public:
     CurrentSource(const string& n, int n1, int n2, double val) : Component(CURRENT_SOURCE, n, n1, n2, val) {}
@@ -950,6 +1067,177 @@ public:
                int& nextVariable) override {
         if (node1 != 0) J[node1-1] -= value;
         if (node2 != 0) J[node2-1] += value;
+    }
+};
+
+class SinCurrentSource : public Component {
+    double amplitude;
+    double frequency;
+    double phase;
+    double offset;
+public:
+    SinCurrentSource(const string& n, int n1, int n2, double amp, double freq, double ph = 0.0, double off = 0.0)
+            : Component(SIN_CURRENT_SOURCE, n, n1, n2, 0.0),
+              amplitude(amp), frequency(freq), phase(ph), offset(off) {}
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        double t = Circuit::getTime();
+        double radians = phase * M_PI / 180.0;
+        double i = offset + amplitude * sin(2 * M_PI * frequency * t + radians);
+
+        if (node1 != 0) J[node1 - 1] -= i;
+        if (node2 != 0) J[node2 - 1] += i;
+    }
+
+    string getInfo() const override {
+        return "Sinusoidal Current Source " + name + " " + getNodeName(node1) + " " + getNodeName(node2) +
+               " DC=" + to_string(offset) + " AMP=" + to_string(amplitude) +
+               " FREQ=" + to_string(frequency) + " PHASE=" + to_string(phase);
+    }
+};
+
+class PulseCurrentSource : public Component {
+    double i1, i2, td, tr, tf, pw, per;
+public:
+    PulseCurrentSource(const string& n, int n1, int n2, double i1, double i2,
+                       double td, double tr, double tf, double pw, double per)
+            : Component(PULSE_CURRENT_SOURCE, n, n1, n2, 0.0),
+              i1(i1), i2(i2), td(td), tr(tr), tf(tf), pw(pw), per(per) {}
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        double t = Circuit::getTime();
+        double cycleTime = fmod(t - td, per);
+        double i = i1;
+
+        if (t < td) {
+            i = i1;
+        } else if (cycleTime < tr) {
+            i = i1 + (i2 - i1) * (cycleTime / tr);
+        } else if (cycleTime < tr + pw) {
+            i = i2;
+        } else if (cycleTime < tr + pw + tf) {
+            i = i2 + (i1 - i2) * (cycleTime - tr - pw) / tf;
+        }
+
+        if (node1 != 0) J[node1 - 1] -= i;
+        if (node2 != 0) J[node2 - 1] += i;
+    }
+
+    string getInfo() const override {
+        return "Pulse Current Source " + name + " " + getNodeName(node1) + " " + getNodeName(node2) +
+               " I1=" + to_string(i1) + " I2=" + to_string(i2) + " TD=" + to_string(td) +
+               " TR=" + to_string(tr) + " TF=" + to_string(tf) + " PW=" + to_string(pw) +
+               " PER=" + to_string(per);
+    }
+};
+
+class VCVS : public Component {
+    int ctrlNode1, ctrlNode2;
+public:
+    VCVS(const string& n, int n1, int n2, int cn1, int cn2, double gain)
+            : Component(VCVS_SOURCE, n, n1, n2, gain), ctrlNode1(cn1), ctrlNode2(cn2) {}
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        int vsIndex = nextVariable++;
+
+        if (node1 != 0) B[node1 - 1][vsIndex] = 1;
+        if (node2 != 0) B[node2 - 1][vsIndex] = -1;
+        if (node1 != 0) C[vsIndex][node1 - 1] = 1;
+        if (node2 != 0) C[vsIndex][node2 - 1] = -1;
+
+        // Controlled voltage difference
+        if (ctrlNode1 != 0) D[vsIndex][ctrlNode1 - 1] -= value;
+        if (ctrlNode2 != 0) D[vsIndex][ctrlNode2 - 1] += value;
+    }
+};
+
+class CCVS : public Component {
+    string controllingVoltageSourceName;
+    int controllingSourceIndex;
+public:
+    CCVS(const string& n, int n1, int n2, const string& ctrlName, double gain)
+            : Component(CCVS_SOURCE, n, n1, n2, gain), controllingVoltageSourceName(ctrlName), controllingSourceIndex(-1) {}
+
+    void resolveIndices(const unordered_map<string, int>& voltageSourceIndexMap) {
+        controllingSourceIndex = voltageSourceIndexMap.at(controllingVoltageSourceName);
+    }
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        int vsIndex = nextVariable++;
+
+        if (node1 != 0) B[node1 - 1][vsIndex] = 1;
+        if (node2 != 0) B[node2 - 1][vsIndex] = -1;
+        if (node1 != 0) C[vsIndex][node1 - 1] = 1;
+        if (node2 != 0) C[vsIndex][node2 - 1] = -1;
+
+        D[vsIndex][controllingSourceIndex] = -value;
+    }
+};
+
+class VCCS : public Component {
+    int ctrlNode1, ctrlNode2;
+public:
+    VCCS(const string& n, int n1, int n2, int cn1, int cn2, double gm)
+            : Component(VCCS_SOURCE, n, n1, n2, gm), ctrlNode1(cn1), ctrlNode2(cn2) {}
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        if (node1 != 0 && ctrlNode1 != 0) G[node1 - 1][ctrlNode1 - 1] += value;
+        if (node1 != 0 && ctrlNode2 != 0) G[node1 - 1][ctrlNode2 - 1] -= value;
+        if (node2 != 0 && ctrlNode1 != 0) G[node2 - 1][ctrlNode1 - 1] -= value;
+        if (node2 != 0 && ctrlNode2 != 0) G[node2 - 1][ctrlNode2 - 1] += value;
+    }
+};
+
+class CCCS : public Component {
+    string controllingVoltageSourceName;
+    int controllingSourceIndex;
+public:
+    CCCS(const string& n, int n1, int n2, const string& ctrlName, double beta)
+            : Component(CCCS_SOURCE, n, n1, n2, beta), controllingVoltageSourceName(ctrlName), controllingSourceIndex(-1) {}
+
+    void resolveIndices(const unordered_map<string, int>& voltageSourceIndexMap) {
+        controllingSourceIndex = voltageSourceIndexMap.at(controllingVoltageSourceName);
+    }
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>& B,
+               vector<vector<double>>& C,
+               vector<vector<double>>& D,
+               vector<double>& J,
+               vector<double>& E,
+               int& nextVariable) override {
+        if (node1 != 0) D[node1 - 1][controllingSourceIndex] += value;
+        if (node2 != 0) D[node2 - 1][controllingSourceIndex] -= value;
     }
 };
 
@@ -1209,6 +1497,12 @@ int main(int argc, char* argv[]) {
     cout << "  add GND <node> - Add ground connection\n";
     cout << "  add VS<name> <node1> <node2> <DC> <AMP> <FREQ> [PHASE] - Add sinusoidal voltage source\n";
     cout << "  add VP<name> <node1> <node2> <V1> <V2> <TD> <TR> <TF> <PW> <PER> - Add pulse voltage source\n";
+    cout << "  add IS<name> <node1> <node2> <DC> <AMP> <FREQ> [PHASE] - Add sinusoidal current source\n";
+    cout << "  add IP<name> <node1> <node2> <I1> <I2> <TD> <TR> <TF> <PW> <PER> - Add pulse current source\n";
+    cout << "  add E<name> <node+> <node-> <controllingNode+> <controllingNode-> <gain> - Add VCVS (Voltage Controlled Voltage Source)\n";
+    cout << "  add H<name> <node+> <node-> <voltageSourceName> <gain> - Add CCVS (Current Controlled Voltage Source)\n";
+    cout << "  add G<name> <node+> <node-> <controllingNode+> <controllingNode-> <transconductance> - Add VCCS (Voltage Controlled Current Source)\n";
+    cout << "  add F<name> <node+> <node-> <voltageSourceName> <gain> - Add CCCS (Current Controlled Current Source)\n";
     cout << "  delete R<name> - Delete resistor\n";
     cout << "  delete C<name> - Delete capacitor\n";
     cout << "  delete L<name> - Delete inductor\n";
@@ -1224,6 +1518,7 @@ int main(int argc, char* argv[]) {
     cout << "  load <filename> - Load circuit from file\n";
     cout << "  analyze - Run simulation\n";
     cout << "  analyze DC - Run DC analysis\n";
+    cout << "  analyze DC SWEEP <Vsource> <start> <stop> <step> - Run DC sweep analysis\n";
     cout << "  analyze TRAN <tstep> <tstop> - Run transient analysis\n";
     cout << "  exit - Quit program\n";
 
@@ -1272,10 +1567,27 @@ int main(int argc, char* argv[]) {
                     circuit.analyzeTransient(tStep, tStop);
                     circuit.printTransientResults(Vtimes, voltages, currents, circuit.listNodes().size() - 1);
                 }
+                else if (toupper(analysisType[0]) == 'S') {  // DC Sweep
+                    string sourceName;
+                    double start, stop, step;
+
+                    if (!(iss >> sourceName >> start >> stop >> step)) {
+                        cout << "ERROR: Missing parameters for DC sweep analysis\n";
+                        continue;
+                    }
+                    if (step <= 0 || start > stop) {
+                        cout << "ERROR: Invalid sweep parameters\n";
+                        continue;
+                    }
+
+                    circuit.analyzeDCSweep(sourceName, start, stop, step);
+                }
+                else {
+                    cout << "ERROR: Unknown analysis type '" << analysisType << "'\n";
+                }
             } catch (const runtime_error& e) {
                 cout << "ERROR: " << e.what() << "\n";
             }
-            break;
         }
         else if (cmd == "exit") {
             return 0;
@@ -1360,7 +1672,8 @@ int main(int argc, char* argv[]) {
                     cout << "SUCCESS: Sinusoidal voltage source " << name << " added between "
                          << node1 << " and " << node2 << "\n";
                     continue;
-                } else if (typeName.size() > 1 && toupper(typeName[1]) == 'P') {
+                }
+                else if (typeName.size() > 1 && toupper(typeName[1]) == 'P') {
                     double v1, v2, td, tr, tf, pw, per;
                     if (!(iss >> v1 >> v2 >> td >> tr >> tf >> pw >> per)) {
                         cout << "ERROR: Missing parameters for pulse source\n";
@@ -1381,80 +1694,186 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                switch (typeChar) {
-                    case 'R':
-                        circuit.addComponent(new Resistor(name, n1, n2, value));
-                        cout << "SUCCESS: Resistor " << name << " added between "
-                             << node1 << " and " << node2 << "\n";
-                        break;
-                    case 'C':
-                        circuit.addComponent(new Capacitor(name, n1, n2, value));
-                        cout << "SUCCESS: Capacitor " << name << " added between "
-                             << node1 << " and " << node2 << "\n";
-                        break;
-                    case 'L':
-                        circuit.addComponent(new Inductor(name, n1, n2, value));
-                        cout << "SUCCESS: Inductor " << name << " added between "
-                             << node1 << " and " << node2 << "\n";
-                        break;
-                    case 'V':
-                        circuit.addComponent(new VoltageSource(name, n1, n2, value));
-                        cout << "SUCCESS: Voltage source " << name << " added between "
-                             << node1 << " and " << node2 << "\n";
-                        break;
-                    case 'I':
-                        circuit.addComponent(new CurrentSource(name, n1, n2, value));
-                        cout << "SUCCESS: Current source " << name << " added between "
-                             << node1 << " and " << node2 << "\n";
-                        break;
-                    case 'D':
-                        circuit.addComponent(new Diode(name, n1, n2));
-                        cout << "SUCCESS: Diode " << name << " added between "
-                             << node1 << " and " << node2 << "\n";
-                        break;
-                    default:
-                        cout << "ERROR: Unknown component type '" << typeChar << "'\n";
+                if (typeChar == 'R') {
+                    circuit.addComponent(new Resistor(name, n1, n2, value));
+                    cout << "SUCCESS: Resistor " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
                 }
+                else if (typeChar == 'C') {
+                    circuit.addComponent(new Capacitor(name, n1, n2, value));
+                    cout << "SUCCESS: Capacitor " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
+                }
+                else if (typeChar == 'L') {
+                    circuit.addComponent(new Inductor(name, n1, n2, value));
+                    cout << "SUCCESS: Inductor " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
+                }
+                else if (typeChar == 'V') {
+                    circuit.addComponent(new VoltageSource(name, n1, n2, value));
+                    cout << "SUCCESS: Voltage source " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
+                }
+                else if (typeChar == 'I') {
+                    circuit.addComponent(new CurrentSource(name, n1, n2, value));
+                    cout << "SUCCESS: Current source " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
+                }
+                else if (typeChar == 'D') {
+                    circuit.addComponent(new Diode(name, n1, n2));
+                    cout << "SUCCESS: Diode " << name << " added between "
+                         << node1 << " and " << node2 << "\n";
+                }
+                else if (typeChar == 'E') {  // VCVS
+                    string cNode1, cNode2;
+                    double gain;
+                    if (!(iss >> node1 >> node2 >> cNode1 >> cNode2 >> gain)) {
+                        cout << "ERROR: Missing parameters for VCVS\n";
+                        continue;
+                    }
+                    int n1 = getOrCreateNode(node1);
+                    int n2 = getOrCreateNode(node2);
+                    int cn1 = getOrCreateNode(cNode1);
+                    int cn2 = getOrCreateNode(cNode2);
+                    circuit.addComponent(new VCVS(name, n1, n2, cn1, cn2, gain));
+                    cout << "SUCCESS: VCVS " << name << " added\n";
+                }
+                else if (typeChar == 'H') {  // CCVS
+                    string vsName;
+                    double gain;
+                    if (!(iss >> node1 >> node2 >> vsName >> gain)) {
+                        cout << "ERROR: Missing parameters for CCVS\n";
+                        continue;
+                    }
+                    int n1 = getOrCreateNode(node1);
+                    int n2 = getOrCreateNode(node2);
+                    circuit.addComponent(new CCVS(name, n1, n2, vsName, gain));
+                    cout << "SUCCESS: CCVS " << name << " added\n";
+                }
+                else if (typeChar == 'G') {  // VCCS
+                    string cNode1, cNode2;
+                    double transconductance;
+                    if (!(iss >> node1 >> node2 >> cNode1 >> cNode2 >> transconductance)) {
+                        cout << "ERROR: Missing parameters for VCCS\n";
+                        continue;
+                    }
+                    int n1 = getOrCreateNode(node1);
+                    int n2 = getOrCreateNode(node2);
+                    int cn1 = getOrCreateNode(cNode1);
+                    int cn2 = getOrCreateNode(cNode2);
+                    circuit.addComponent(new VCCS(name, n1, n2, cn1, cn2, transconductance));
+                    cout << "SUCCESS: VCCS " << name << " added\n";
+                }
+                else if (typeChar == 'F') {  // CCCS
+                    string vsName;
+                    double gain;
+                    if (!(iss >> node1 >> node2 >> vsName >> gain)) {
+                        cout << "ERROR: Missing parameters for CCCS\n";
+                        continue;
+                    }
+                    int n1 = getOrCreateNode(node1);
+                    int n2 = getOrCreateNode(node2);
+                    circuit.addComponent(new CCCS(name, n1, n2, vsName, gain));
+                    cout << "SUCCESS: CCCS " << name << " added\n";
+                }
+                else if (typeChar == 'I') {
+                    if (typeName.size() > 1 && toupper(typeName[1]) == 'S') {
+                        // Sinusoidal Current Source: ISIN name n1 n2 DC AMP FREQ [PHASE]
+                        double dc, amp, freq, phase = 0.0;
+                        if (!(iss >> node1 >> node2 >> dc >> amp >> freq)) {
+                            cout << "ERROR: Missing parameters for sinusoidal current source\n";
+                            continue;
+                        }
+                        iss >> phase; // optional
+                        int n1 = getOrCreateNode(node1);
+                        int n2 = getOrCreateNode(node2);
+                        circuit.addComponent(new SinCurrentSource(name, n1, n2, amp, freq, phase, dc));
+                        cout << "SUCCESS: Sinusoidal current source " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
+                    }
+                    else if (typeName.size() > 1 && toupper(typeName[1]) == 'P') {
+                        // Pulse Current Source: IPULSE name n1 n2 I1 I2 TD TR TF PW PER
+                        double i1, i2, td, tr, tf, pw, per;
+                        if (!(iss >> node1 >> node2 >> i1 >> i2 >> td >> tr >> tf >> pw >> per)) {
+                            cout << "ERROR: Missing parameters for pulse current source\n";
+                            continue;
+                        }
+                        int n1 = getOrCreateNode(node1);
+                        int n2 = getOrCreateNode(node2);
+                        circuit.addComponent(new PulseCurrentSource(name, n1, n2, i1, i2, td, tr, tf, pw, per));
+                        cout << "SUCCESS: Pulse current source " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
+                    }
+                    else {
+                        // Regular DC Current Source
+                        double value;
+                        if (!(iss >> node1 >> node2 >> value)) {
+                            cout << "ERROR: Missing parameters for current source\n";
+                            continue;
+                        }
+                        int n1 = getOrCreateNode(node1);
+                        int n2 = getOrCreateNode(node2);
+                        circuit.addComponent(new CurrentSource(name, n1, n2, value));
+                        cout << "SUCCESS: DC current source " << name << " added between "
+                             << node1 << " and " << node2 << "\n";
+                    }
+                }
+                else {
+                    cout << "ERROR: Unknown component type '" << typeChar << "'\n";
+                }
+
             } catch (const exception& e) {
                 cout << "ERROR: Invalid input format\n";
             }
         }
+        else if ( cmd=="return")
+        {    cout << "Circuit Simulator - OOP Project Phase 1\n";
+            cout << "Available commands:\n";
+            cout << "  add R<name> <node1> <node2> <value> - Add resistor\n";
+            cout << "  add C<name> <node1> <node2> <value> - Add capacitor\n";
+            cout << "  add L<name> <node1> <node2> <value> - Add inductor\n";
+            cout << "  add V<name> <node1> <node2> <value> - Add voltage source\n";
+            cout << "  add I<name> <node1> <node2> <value> - Add current source\n";
+            cout << "  add D<name> <node1> <node2> <model> - Add diode\n";
+            cout << "  add GND <node> - Add ground connection\n";
+            cout << "  add VS<name> <node1> <node2> <DC> <AMP> <FREQ> [PHASE] - Add sinusoidal voltage source\n";
+            cout << "  add VP<name> <node1> <node2> <V1> <V2> <TD> <TR> <TF> <PW> <PER> - Add pulse voltage source\n";
+            cout << "  delete R<name> - Delete resistor\n";
+            cout << "  delete C<name> - Delete capacitor\n";
+            cout << "  delete L<name> - Delete inductor\n";
+            cout << "  delete D<name> - Delete diode\n";
+            cout << "  delete GND <node> - Delete ground connection\n";
+            cout << "  .nodes - List all nodes\n";
+            cout << "  .list - List all components\n";
+            cout << "  .list R - List resistors\n";
+            cout << "  .list C - List capacitors\n";
+            cout << "  .list L - List inductors\n";
+            cout << "  .list D - List diodes\n";
+            cout << "  .rename node <old_name> <new_name> - Rename a node\n";
+            cout << "  load <filename> - Load circuit from file\n";
+            cout << "  analyze - Run simulation\n";
+            cout << "  analyze DC - Run DC analysis\n";
+            cout << "  analyze TRAN <tstep> <tstop> - Run transient analysis\n";
+            cout << "  exit - Quit program\n";
+        }
         else if (cmd == "delete") {
-            string typeName;
-            if (!(iss >> typeName)) {
-                cout << "ERROR: Missing component type\n";
+            string name;
+            if (!(iss >> name)) {
+                cout << "ERROR: Missing component name\n";
                 continue;
             }
 
-            char typeChar = toupper(typeName[0]);
-            string name = typeName.substr(1);
-
-            if (typeChar == 'G' && toupper(typeName[1]) == 'N' && toupper(typeName[2]) == 'D') {
-                string node;
-                if (!(iss >> node)) {
-                    cout << "ERROR: Missing node for ground deletion\n";
-                    continue;
-                }
-                bool success = circuit.deleteComponent('G', "GND");
-                if (success) {
-                    cout << "SUCCESS: Ground connection removed\n";
-                } else {
-                    cout << "ERROR: Ground connection not found\n";
-                }
-                continue;
-            }
-
-            bool success = circuit.deleteComponent(typeChar, name);
+            bool success = circuit.deleteComponent(name);
             if (success) {
-                cout << "SUCCESS: Component " << typeName << " deleted\n";
+                cout << "SUCCESS: Component " << name << " deleted\n";
             } else {
-                cout << "ERROR: Cannot delete " << typeName << "; component not found\n";
+                cout << "ERROR: Component " << name << " not found\n";
             }
         }
         else if (cmd == ".rename") {
             string subcmd, oldName, newName;
             if (!(iss >> subcmd >> oldName >> newName)) {
-                cout << "ERROR: Invalid syntax - correct format: .rename node <old_name> <new_name>\n";
+                cout << "ERROR: Invalid syntax - correct format: .rename [node|element] <old_name> <new_name>\n";
                 continue;
             }
 
@@ -1471,13 +1890,29 @@ int main(int argc, char* argv[]) {
                         cout << "ERROR: Node " << oldName << " does not exist\n";
                     }
                 }
-            } else {
-                cout << "ERROR: Invalid syntax - correct format: .rename node <old_name> <new_name>\n";
+            }
+            else if (subcmd == "element") {
+                bool success = circuit.renameComponent(oldName, newName);
+                if (success) {
+                    cout << "SUCCESS: Element renamed from " << oldName << " to " << newName << "\n";
+                } else {
+                    if (!circuit.hasComponent(oldName)) {
+                        cout << "ERROR: Component " << oldName << " does not exist\n";
+                    } else if (circuit.hasComponent(newName)) {
+                        cout << "ERROR: Component name " << newName << " already exists\n";
+                    } else {
+                        cout << "ERROR: Failed to rename component\n";
+                    }
+                }
+            }
+            else {
+                cout << "ERROR: Invalid syntax - correct format: .rename [node|element] <old_name> <new_name>\n";
             }
         }
         else {
             cout << "ERROR: Unknown command '" << cmd << "'\n";
         }
+
     }
 
     char choice;
@@ -1515,7 +1950,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (!voltages.empty()) {
+    if (!voltages.empty())  {
         if (SDL_Init(SDL_INIT_VIDEO) < 0) {
             cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << endl;
             return 1;
@@ -1556,3 +1991,4 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
+
