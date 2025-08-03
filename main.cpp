@@ -82,11 +82,10 @@ bool showCurrent = false;
 bool FileMenu = false;
 bool ComponentLibrary = false;
 bool AnalysisSettings = false;
-SDL_Rect fileMenuRect = {10, 45, 140, 250}; // Positioned below file button
+SDL_Rect fileMenuRect = {10, 45, 140, 250};
 
-// Analysis parameters
-double tStep = 0.001;  // Default time step (1ms)
-double tStop = 0.1;    // Default stop time (100ms)
+double tStep = 0.001;
+double tStop = 0.1;
 std::map<int, SDL_Point> nodePositions;
 
 enum ComponentType {
@@ -1613,13 +1612,11 @@ void showCircuitHelp() {
     cout << "------------------------------------\n";
 }
 
-// SDL Window and Renderer
 SDL_Window* window = nullptr;
 SDL_Renderer* renderer = nullptr;
 const int SCREEN_WIDTH = 1280;
 const int SCREEN_HEIGHT = 720;
 
-// Colors
 const SDL_Color WHITE = {255, 255, 255, 255};
 const SDL_Color BLACK = {0, 0, 0, 255};
 const SDL_Color RED = {255, 0, 0, 255};
@@ -1627,10 +1624,8 @@ const SDL_Color GREEN = {0, 255, 0, 255};
 const SDL_Color BLUE = {0, 0, 255, 255};
 const SDL_Color GRAY = {200, 200, 200, 255};
 
-// Font
 TTF_Font* font = nullptr;
 
-// UI Elements
 struct Button {
     SDL_Rect rect;
     std::string text;
@@ -1644,9 +1639,12 @@ struct TextBox {
     bool isActive;
 };
 
-// Circuit visualization
 SDL_Rect circuitArea = {50, 50, 800, 600};
 SDL_Rect plotArea = {850, 50, 380, 600};
+Button fileBtn = {10, 5, 80, 30, "File", GRAY};
+Button componentLibBtn = {100, 5, 80, 30, "Components", GRAY};
+Button analyzeBtn = {190, 5, 80, 30, "Analyze", GRAY};
+Button plotBtn = {280, 5, 80, 30, "Plot", BLUE};
 
 bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -1725,7 +1723,6 @@ void calculateNodePositions(const Circuit& circuit) {
     }
 }
 
-// Helper function to calculate perpendicular offset
 void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
                           int& outX1, int& outY1, int& outX2, int& outY2) {
     // Calculate direction vector
@@ -1744,7 +1741,6 @@ void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
     outY2 = y2 + ny * offset;
 }
 
-// Draw resistor symbol (zigzag line)
 void drawResistor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
     const int segments = 5;
     const int amplitude = 10;
@@ -1780,7 +1776,6 @@ void drawResistor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const 
     renderText(name, (x1 + x2)/2 + px * amplitude*2, (y1 + y2)/2 + py * amplitude*2, BLACK);
 }
 
-// Draw capacitor symbol (two parallel lines)
 void drawCapacitor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
     const int gap = 12;
 
@@ -1799,7 +1794,6 @@ void drawCapacitor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const
     renderText(name, (x1 + x2)/2, (y1 + y2)/2 - gap, BLACK);
 }
 
-// Draw inductor symbol (semicircles)
 void drawInductor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
     const int loops = 3;
     const int radius = 8;
@@ -1836,7 +1830,6 @@ void drawInductor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const 
     renderText(name, (x1 + x2)/2 + px * radius*2, (y1 + y2)/2 + py * radius*2, BLACK);
 }
 
-// Draw voltage source symbol (circle with + and -)
 void drawVoltageSource(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
     const int radius = 12;
     int centerX = (x1 + x2) / 2;
@@ -2292,6 +2285,107 @@ void handleComponentSelection(Circuit* circuit, int x, int y) {
         }
 }
 
+void handleMainViewClick(Circuit circuit, int x, int y) {
+    if (isMouseOver(circuitArea, x, y)) {
+        selectedComponent = nullptr;
+        calculateNodePositions(circuit);
+
+        for (const auto& comp : circuit.getComponents()) {
+            SDL_Point p1 = nodePositions[comp->node1];
+            SDL_Point p2 = nodePositions[comp->node2];
+
+            if (isPointNearLine(x, y, p1.x, p1.y, p2.x, p2.y, 10)) {
+                selectedComponent = comp;
+                break;
+            }
+        }
+    }
+}
+
+void handleLibraryClick(int x, int y) {
+    SDL_Rect libWindow = {200, 100, 400, 500};
+
+    // Check close button
+    SDL_Rect closeBtn = {libWindow.x + libWindow.w - 40, libWindow.y + 10, 30, 30};
+    if (isMouseOver(closeBtn, x, y)) {
+        currentState = MAIN_VIEW;
+        return;
+    }
+
+    // Check category clicks
+    for (int i = 0; i < 4; i++) {
+        SDL_Rect catRect = {libWindow.x + 20, libWindow.y + 60 + i*60, 360, 50};
+        if (isMouseOver(catRect, x, y)) {
+            cout << "Selected category: " << i << endl;
+            // Here you would add the selected component to the circuit
+            currentState = MAIN_VIEW;
+            break;
+        }
+    }
+}
+
+void handlePlotClick(int x, int y) {
+    SDL_Rect backBtn = {50, 50, 100, 40};
+    if (isMouseOver(backBtn, x, y)) {
+        currentState = MAIN_VIEW;
+    }
+}
+
+void handleToolbarClick(int x, int y) {
+    if (isMouseOver(fileBtn.rect, x, y)) {
+        // File menu handled separately
+    }
+    else if (isMouseOver(componentLibBtn.rect, x, y)) {
+        currentState = COMPONENT_LIBRARY;
+    }
+    else if (isMouseOver(analyzeBtn.rect, x, y)) {
+        currentState = ANALYSIS_SETTINGS;
+    }
+    else if (isMouseOver(plotBtn.rect, x, y)) {
+        currentState = PLOT_VIEW;
+    }
+}
+
+void handleAnalysisClick(int x, int y) {
+    SDL_Rect analysisWindow = {250, 150, 350, 300};
+
+    // Check if click is in analysis window
+    if (!isMouseOver(analysisWindow, x, y)) {
+        currentState = MAIN_VIEW;
+        return;
+    }
+
+    // Check Run button
+    SDL_Rect runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40};
+    if (isMouseOver(runBtn, x, y)) {
+        currentState = PLOT_VIEW;
+        // Start analysis here
+    }
+
+    // Check Cancel button
+    SDL_Rect cancelBtn = {analysisWindow.x + 200, analysisWindow.y + 220, 100, 40};
+    if (isMouseOver(cancelBtn, x, y)) {
+        currentState = MAIN_VIEW;
+    }
+}
+
+void handleMouseClick(Circuit circuit, int x, int y) {
+    switch (currentState) {
+        case MAIN_VIEW:
+            handleMainViewClick(circuit, x, y);
+        break;
+        case COMPONENT_LIBRARY:
+            handleLibraryClick(x, y);
+        break;
+        case ANALYSIS_SETTINGS:
+            handleAnalysisClick(x, y);
+                break;
+        case PLOT_VIEW:
+            handlePlotClick(x, y);
+        break;
+    }
+}
+
 void handleAnalyzeButton(Circuit* circuit) {
     if (!circuit) return;
 
@@ -2358,16 +2452,93 @@ void handleToolbarButton(int x, int y) {
     }
 }
 
+void renderMainView(SDL_Renderer* renderer, Circuit& circuit) {
+    // Draw the main circuit view
+    drawCircuit(circuit, renderer);
+
+    // Show component properties if one is selected
+    if (selectedComponent) {
+        showComponentProperties(renderer, selectedComponent);
+    }
+}
+
+void renderComponentLibrary(SDL_Renderer* renderer) {
+    SDL_Rect libWindow = {200, 100, 400, 500};
+
+    // Window background
+    SDL_SetRenderDrawColor(renderer, 230, 230, 230, 255);
+    SDL_RenderFillRect(renderer, &libWindow);
+
+    // Title
+    renderText("Component Library", libWindow.x + 20, libWindow.y + 20, BLACK);
+
+    // Component categories
+    const char* categories[] = {"Passives", "Sources", "Semiconductors", "Custom"};
+    for (int i = 0; i < 4; i++) {
+        SDL_Rect catRect = {libWindow.x + 20, libWindow.y + 60 + i*60, 360, 50};
+        SDL_SetRenderDrawColor(renderer, 200, 200, 255, 255);
+        SDL_RenderFillRect(renderer, &catRect);
+        renderText(categories[i], catRect.x + 10, catRect.y + 15, BLACK);
+    }
+
+    // Close button
+    Button closeBtn = {libWindow.x + libWindow.w - 40, libWindow.y + 10, 30, 30, "X", RED};
+    renderButton(closeBtn);
+}
+
+void renderAnalysisSettings(SDL_Renderer* renderer) {
+    SDL_Rect analysisWindow = {250, 150, 350, 300};
+
+    // Window background
+    SDL_SetRenderDrawColor(renderer, 230, 230, 250, 255);
+    SDL_RenderFillRect(renderer, &analysisWindow);
+
+    // Title
+    renderText("Analysis Settings", analysisWindow.x + 20, analysisWindow.y + 20, BLACK);
+
+    // Input fields
+    renderText("Time Step (s):", analysisWindow.x + 20, analysisWindow.y + 60, BLACK);
+    TextBox stepBox = {analysisWindow.x + 150, analysisWindow.y + 60, 150, 30, std::to_string(tStep)};
+    renderTextBox(stepBox);
+
+    renderText("Stop Time (s):", analysisWindow.x + 20, analysisWindow.y + 110, BLACK);
+    TextBox stopBox = {analysisWindow.x + 150, analysisWindow.y + 110, 150, 30, std::to_string(tStop)};
+    renderTextBox(stopBox);
+
+    // Action buttons
+    Button runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40, "Run", GREEN};
+    Button cancelBtn = {analysisWindow.x + 200, analysisWindow.y + 220, 100, 40, "Cancel", RED};
+    renderButton(runBtn);
+    renderButton(cancelBtn);
+}
+
+void renderPlotView(SDL_Renderer* renderer) {
+    // Clear with a light gray background
+    SDL_SetRenderDrawColor(renderer, 245, 245, 245, 255);
+    SDL_RenderClear(renderer);
+
+    // Plot area
+    SDL_Rect plotArea = {100, 100, SCREEN_WIDTH-200, SCREEN_HEIGHT-200};
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &plotArea);
+
+    // Draw plot if we have data
+    if (!voltages.empty()) {
+        plotSignals(renderer, voltages, Vtimes, plotArea);
+    }
+
+    // Back button
+    Button backBtn = {50, 50, 100, 40, "Back", GRAY};
+    renderButton(backBtn);
+}
+
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
 
     string command;
     string currentCircuitFile = "";
-    bool inCircuitMode = false;
-    // Initialize circuit
     Circuit* circuit = new Circuit();
 
-    // Initialize window states
     FileMenu = false;
     ComponentLibrary = false;
     AnalysisSettings = false;
@@ -2382,7 +2553,6 @@ int main(int argc, char* argv[]) {
     bool running = true;
     SDL_Event event;
 
-    // UI Elements
     Button addCompBtn = {{20, 20, 150, 40}, "Add Component", GREEN, false};
     Button analyzeBtn = {{20, 70, 150, 40}, "Analyze", BLUE, false};
     Button saveBtn = {{20, 120, 150, 40}, "Save", GRAY, false};
@@ -2393,10 +2563,8 @@ int main(int argc, char* argv[]) {
     TextBox valueBox = {{420, 20, 100, 40}, "Value", false};
 
     while (running) {
-        // Handle events
         while (SDL_PollEvent(&event)) {
 
-            // In your event handling:
             if (event.type == SDL_KEYDOWN) {
                 switch (event.key.keysym.sym) {
                     case SDLK_F5:
@@ -2413,18 +2581,15 @@ int main(int argc, char* argv[]) {
                         }
                     break;
                     case SDLK_ESCAPE:
-                        // Return to main menu or exit
                             break;
                 }
             }
 
-            // Inside your main loop's event handling section
             if (event.type == SDL_MOUSEBUTTONDOWN) {
                 int x, y;
                 SDL_GetMouseState(&x, &y);
 
-                // Add to your mouse click handling:
-                if (y <= 40) { // Toolbar area
+                if (y <= 40) {
                     handleToolbarButton(x, y);
                 }
                 else if (isMouseOver(circuitArea, x, y)) {
@@ -2439,7 +2604,6 @@ int main(int argc, char* argv[]) {
                 else if (isMouseOver(loadBtn.rect, x, y)) {
                     handleLoadButton(circuit, currentCircuitFile);
                 }
-                // Handle text box clicks
                 else if (isMouseOver(node1Box.rect, x, y)) {
                     node1Box.isActive = true;
                     node2Box.isActive = false;
@@ -2492,9 +2656,6 @@ int main(int argc, char* argv[]) {
                 running = false;
             }
 
-            drawToolbar(renderer);
-            drawCircuit(*circuit, renderer);
-            drawStatusBar(renderer, "Ready");
             if (showFileMenu) showFileMenu(renderer, fileMenuRect);
             if (showComponentLibrary) showComponentLibrary(renderer);
             if (showAnalysisSettings) showAnalysisSettings(renderer, &tStep, &tStop);
@@ -2503,65 +2664,22 @@ int main(int argc, char* argv[]) {
             if (!voltages.empty()) {
                 plotSignals(renderer, voltages, Vtimes, plotArea);
             }
-
-            switch (currentState) {
-                case MAIN_VIEW:
-                        break;
-                case COMPONENT_LIBRARY:
-                    showComponentLibrary(renderer);
-                break;
-                case ANALYSIS_SETTINGS:
-                    showAnalysisDialog(renderer, tStep, tStop);
-                break;
-                case PLOT_VIEW:
-                    plotSignals(renderer, voltages, Vtimes, plotArea);
-                break;
-            }
-
-            // Handle button clicks
-            if (event.type == SDL_MOUSEBUTTONDOWN) {
-                int x, y;
-                SDL_GetMouseState(&x, &y);
-
-                if (x >= addCompBtn.rect.x && x <= addCompBtn.rect.x + addCompBtn.rect.w &&
-                    y >= addCompBtn.rect.y && y <= addCompBtn.rect.y + addCompBtn.rect.h) {
-                    // Add component logic
-                    std::string type = "R"; // Default to resistor
-                    std::string name = "R1";
-                    int n1 = getOrCreateNode(node1Box.text);
-                    int n2 = getOrCreateNode(node2Box.text);
-                    double value = std::stod(valueBox.text);
-
-                    circuit->addComponent(new Resistor(name, n1, n2, value));
-                }
-                // Handle other buttons similarly...
-            }
-
-            // Handle text input
-            if (event.type == SDL_TEXTINPUT) {
-                if (node1Box.isActive) node1Box.text += event.text.text;
-                else if (node2Box.isActive) node2Box.text += event.text.text;
-                else if (valueBox.isActive) valueBox.text += event.text.text;
-            }
         }
 
-        // Clear screen
         SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
         SDL_RenderClear(renderer);
 
-        // Draw circuit area
+
         SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, 255);
         SDL_RenderFillRect(renderer, &circuitArea);
         SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
         SDL_RenderDrawRect(renderer, &circuitArea);
 
-        // Draw plot area
         SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, 255);
         SDL_RenderFillRect(renderer, &plotArea);
         SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
         SDL_RenderDrawRect(renderer, &plotArea);
 
-        // Draw UI elements
         renderButton(addCompBtn);
         renderButton(analyzeBtn);
         renderButton(saveBtn);
@@ -2571,11 +2689,28 @@ int main(int argc, char* argv[]) {
         renderTextBox(node2Box);
         renderTextBox(valueBox);
 
-        // Update screen
+        drawToolbar(renderer);
+
+        switch (currentState) {
+            case MAIN_VIEW:
+                renderMainView(renderer, *circuit);
+            break;
+            case COMPONENT_LIBRARY:
+                renderComponentLibrary(renderer);
+            break;
+            case ANALYSIS_SETTINGS:
+                renderAnalysisSettings(renderer);
+            break;
+            case PLOT_VIEW:
+                renderPlotView(renderer);
+            break;
+        }
+
+        drawStatusBar(renderer, "Ready");
+
         SDL_RenderPresent(renderer);
     }
 
-    // Cleanup
     TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
@@ -2972,11 +3107,8 @@ int main(int argc, char* argv[]) {
         }
     }*/
 
-    if (circuit) {
-        delete circuit;
-    }
+    delete circuit;
 
     cout << "Exiting simulator. Goodbye!\n";
     return 0;
 }
-
