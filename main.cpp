@@ -1601,7 +1601,7 @@ bool initSDL() {
         return false;
     }
 
-    font = TTF_OpenFont("arial.ttf", 24);
+    font = TTF_OpenFont("C:\\Windows\\Fonts\\consola.ttf", 24);
     if (!font) {
         std::cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << std::endl;
         return false;
@@ -1635,7 +1635,7 @@ void renderTextBox(const TextBox& box) {
     renderText(box.text, box.rect.x + 5, box.rect.y + 5, BLACK);
 }
 
-void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
+/*void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
     // Draw nodes
     for (const auto& node : nodeMap) {
         int x = 100 + node.second * 100;
@@ -1650,9 +1650,9 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
     for (const auto& comp : circuit.listComponents()) {
         // Parse component info and draw accordingly
         // This is simplified - you'll need to implement proper drawing for each component type
-        int x1 = 100 + comp->node1 * 100;
+        int x1 = 100 + comp.node1 * 100;
         int y1 = 100;
-        int x2 = 100 + comp->node2 * 100;
+        int x2 = 100 + comp.node2 * 100;
         int y2 = 100;
 
         SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
@@ -1661,9 +1661,9 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         // Draw component symbol in the middle
         int midX = (x1 + x2) / 2;
         int midY = (y1 + y2) / 2;
-        renderText(comp->name, midX, midY, BLACK);
+        renderText(comp.name, midX, midY, BLACK);
     }
-}
+}*/
 
 void plotSignals(SDL_Renderer* renderer, const std::vector<double>& voltages,
                 const std::vector<double>& times, const SDL_Rect& area) {
@@ -1682,10 +1682,10 @@ void plotSignals(SDL_Renderer* renderer, const std::vector<double>& voltages,
 
     // Plot points
     for (size_t i = 1; i < times.size(); i++) {
-        int x1 = area.x + static_cast<int>((times[i-1] - minT) / (maxT - minT) * area.w;
-        int y1 = area.y + area.h - static_cast<int>((voltages[i-1] - minV) / (maxV - minV) * area.h;
-        int x2 = area.x + static_cast<int>((times[i] - minT) / (maxT - minT) * area.w;
-        int y2 = area.y + area.h - static_cast<int>((voltages[i] - minV) / (maxV - minV) * area.h;
+        int x1 = area.x + static_cast<int>((times[i-1] - minT) / (maxT - minT) * area.w);
+        int y1 = area.y + area.h - static_cast<int>((voltages[i-1] - minV) / (maxV - minV) * area.h);
+        int x2 = area.x + static_cast<int>((times[i] - minT) / (maxT - minT) * area.w);
+        int y2 = area.y + area.h - static_cast<int>((voltages[i] - minV) / (maxV - minV) * area.h);
 
         SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
     }
@@ -1788,7 +1788,7 @@ void showComponentProperties(SDL_Renderer* renderer, Component* comp) {
     SDL_RenderDrawRect(renderer, &propRect);
 
     renderText("Component Properties", propRect.x + 10, propRect.y + 10, BLACK);
-    renderText("Type: " + comp->getTypeString(), propRect.x + 20, propRect.y + 40, BLACK);
+    renderText("Type: " + comp->getInfo(), propRect.x + 20, propRect.y + 40, BLACK);
     renderText("Name: " + comp->name, propRect.x + 20, propRect.y + 70, BLACK);
     renderText("Nodes: " + getNodeName(comp->node1) + " - " + getNodeName(comp->node2),
                propRect.x + 20, propRect.y + 100, BLACK);
@@ -1862,24 +1862,13 @@ int main(int argc, char* argv[]) {
 
             // In your main loop, before rendering:
             drawToolbar(renderer);
-            drawCircuit(circuit, renderer);
+            //drawCircuit(circuit, renderer);
             drawStatusBar(renderer, "Ready");
 
-            // Handle different application states
-            switch (currentState) {
-                case COMPONENT_LIBRARY:
-                    showComponentLibrary(renderer);
-                break;
-                case ANALYSIS_SETTINGS:
-                    showAnalysisDialog(renderer, tStep, tStop);
-                break;
-                // ... other states
-            }
-
             // If a component is selected
-            if (selectedComponent) {
+            /*if (selectedComponent) {
                 showComponentProperties(renderer, selectedComponent);
-            }
+            }*/
 
             // If we have analysis results
             if (!voltages.empty()) {
@@ -1894,7 +1883,7 @@ int main(int argc, char* argv[]) {
                     showComponentLibrary(renderer);
                 break;
                 case ANALYSIS_SETTINGS:
-                    showAnalysisDialog(renderer, tStep, tStop);
+                    //showAnalysisDialog(renderer, tStep, tStop);
                 break;
                 case PLOT_VIEW:
                     plotSignals(renderer, voltages, Vtimes, plotArea);
