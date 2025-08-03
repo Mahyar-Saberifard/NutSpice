@@ -55,6 +55,7 @@ vector<string> listTxtFiles(const string& directory) {
     return files;
 }
 
+
 void changeToPreviousDirectory() {
     char currentDir[MAX_PATH];
     if (GETCWD(currentDir, sizeof(currentDir)) == NULL) {
@@ -157,8 +158,8 @@ double parseSpiceValue(const string& valStr) {
     size_t suffixPos = 0;
     while (suffixPos < valStr.size() &&
            (isdigit(valStr[suffixPos]) || valStr[suffixPos] == '.' ||
-           valStr[suffixPos] == '-' || valStr[suffixPos] == '+' ||
-           valStr[suffixPos] == 'e' || valStr[suffixPos] == 'E')) {
+            valStr[suffixPos] == '-' || valStr[suffixPos] == '+' ||
+            valStr[suffixPos] == 'e' || valStr[suffixPos] == 'E')) {
         suffixPos++;
     }
 
@@ -333,7 +334,7 @@ public:
             else if (comp->type == CAPACITOR) typeStr = "Capacitor";
             else typeStr = "Inductor";
             throw runtime_error("Error: " + typeStr + " value must be positive");
-            }
+        }
 
         components.push_back(comp);
         if (comp->node1 > maxNode) maxNode = comp->node1;
@@ -567,98 +568,98 @@ public:
     }
 
     void analyzeTransient(double tStep, double tStop) {
-    currentTimeStep = tStep;
-    double t = 0.0;
+        currentTimeStep = tStep;
+        double t = 0.0;
 
-    voltages.clear();
-    currents.clear();
-    Vtimes.clear();
-    Itimes.clear();
+        voltages.clear();
+        currents.clear();
+        Vtimes.clear();
+        Itimes.clear();
 
-    if (!hasGround()) {
-        throw runtime_error("Error: No ground node detected in the circuit");
-    }
-
-    if (maxNode < 1) {
-        throw runtime_error("Error: Circuit must have at least one non-ground node");
-    }
-
-    int numNodes = maxNode;
-    int numVSources = 0;
-    int numInductors = 0;
-
-    for (auto comp : components) {
-        if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
-            comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
-        if (comp->type == INDUCTOR) numInductors++;
-    }
-
-    int numVars = numNodes + numVSources + numInductors;
-
-    while (t <= tStop) {
-        vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
-        vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
-        vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
-        vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
-        vector<double> J(numNodes, 0.0);
-        vector<double> E(numVSources + numInductors, 0.0);
-
-        for (int i = 0; i < numNodes; i++) {
-            G[i][i] = 1e-12;
+        if (!hasGround()) {
+            throw runtime_error("Error: No ground node detected in the circuit");
         }
 
-        int vsCount = 0;
-        currentTime = t;
+        if (maxNode < 1) {
+            throw runtime_error("Error: Circuit must have at least one non-ground node");
+        }
+
+        int numNodes = maxNode;
+        int numVSources = 0;
+        int numInductors = 0;
+
         for (auto comp : components) {
-            comp->stamp(G, B, C, D, J, E, vsCount);
+            if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
+                comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
+            if (comp->type == INDUCTOR) numInductors++;
         }
 
-        vector<double> x;
-        try {
-            vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
-            vector<double> b(numVars, 0.0);
+        int numVars = numNodes + numVSources + numInductors;
+
+        while (t <= tStop) {
+            vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
+            vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
+            vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
+            vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
+            vector<double> J(numNodes, 0.0);
+            vector<double> E(numVSources + numInductors, 0.0);
 
             for (int i = 0; i < numNodes; i++) {
-                for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
-                for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
-                b[i] = J[i];
-            }
-            for (int i = 0; i < numVSources + numInductors; i++) {
-                for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
-                for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
-                b[numNodes + i] = E[i];
+                G[i][i] = 1e-12;
             }
 
-            x = solveSystem(A, b);
+            int vsCount = 0;
+            currentTime = t;
+            for (auto comp : components) {
+                comp->stamp(G, B, C, D, J, E, vsCount);
+            }
 
-            for (int i = 0; i < numNodes; i++) {
-                Vtimes.push_back(t);
-                voltages.push_back(x[i]);
+            vector<double> x;
+            try {
+                vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
+                vector<double> b(numVars, 0.0);
+
+                for (int i = 0; i < numNodes; i++) {
+                    for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
+                    for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
+                    b[i] = J[i];
+                }
+                for (int i = 0; i < numVSources + numInductors; i++) {
+                    for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
+                    for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
+                    b[numNodes + i] = E[i];
+                }
+
+                x = solveSystem(A, b);
+
+                for (int i = 0; i < numNodes; i++) {
+                    Vtimes.push_back(t);
+                    voltages.push_back(x[i]);
+                }
+
+                for (auto comp : components) {
+                    if (comp->type == RESISTOR || comp->type == CAPACITOR ||
+                        comp->type == INDUCTOR || comp->type == DIODE) {
+                        Itimes.push_back(t);
+                        currents.push_back(comp->getCurrent(x));
+                    }
+                }
+
+            } catch (const runtime_error& e) {
+                cerr << "Error at t=" << t << ": " << e.what() << endl;
+                break;
             }
 
             for (auto comp : components) {
-                if (comp->type == RESISTOR || comp->type == CAPACITOR ||
-                    comp->type == INDUCTOR || comp->type == DIODE) {
-                    Itimes.push_back(t);
-                    currents.push_back(comp->getCurrent(x));
-                }
+                comp->update(tStep, x);
             }
 
-        } catch (const runtime_error& e) {
-            cerr << "Error at t=" << t << ": " << e.what() << endl;
-            break;
+            t += tStep;
         }
-
-        for (auto comp : components) {
-            comp->update(tStep, x);
-        }
-
-        t += tStep;
     }
-}
 
     void printTransientResults(const vector<double>& times, const vector<double>& voltages,
-                      const vector<double>& currents, int numNodes) {
+                               const vector<double>& currents, int numNodes) {
         cout << "\nTransient Analysis Results:\n";
         cout << "--------------------------\n";
 
@@ -689,7 +690,7 @@ public:
                         cout << comp->name << ": " << currents[currentIndex] << "\t";
                         currentIndex++;
                     }
-                    }
+                }
             }
             cout << "\n";
         }
@@ -903,7 +904,7 @@ class Capacitor : public Component {
     double current;
 public:
     Capacitor(const string& n, int n1, int n2, double val)
-        : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0), current(0.0) {}
+            : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0), current(0.0) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>&,
@@ -1096,8 +1097,8 @@ class SinVoltageSource : public Component {
     double offset;
 public:
     SinVoltageSource(const string& n, int n1, int n2, double amp, double freq, double ph = 0.0, double off = 0.0)
-        : Component(SIN_VOLTAGE_SOURCE, n, n1, n2, 0.0),
-          amplitude(amp), frequency(freq), phase(ph), offset(off) {}
+            : Component(SIN_VOLTAGE_SOURCE, n, n1, n2, 0.0),
+              amplitude(amp), frequency(freq), phase(ph), offset(off) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>& B,
@@ -1130,9 +1131,9 @@ class PulseVoltageSource : public Component {
     double v1, v2, td, tr, tf, pw, per;
 public:
     PulseVoltageSource(const string& n, int n1, int n2, double v1, double v2,
-                      double td, double tr, double tf, double pw, double per)
-        : Component(PULSE_VOLTAGE_SOURCE, n, n1, n2, 0.0),
-          v1(v1), v2(v2), td(td), tr(tr), tf(tf), pw(pw), per(per) {}
+                       double td, double tr, double tf, double pw, double per)
+            : Component(PULSE_VOLTAGE_SOURCE, n, n1, n2, 0.0),
+              v1(v1), v2(v2), td(td), tr(tr), tf(tf), pw(pw), per(per) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>& B,
@@ -1658,7 +1659,7 @@ bool initSDL() {
     }
 
     window = SDL_CreateWindow("Circuit Simulator", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                             SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+                              SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     if (!window) {
         std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << std::endl;
         return false;
@@ -1724,7 +1725,7 @@ void calculateNodePositions(const Circuit& circuit) {
 }
 
 void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
-                          int& outX1, int& outY1, int& outX2, int& outY2) {
+                            int& outX1, int& outY1, int& outX2, int& outY2) {
     // Calculate direction vector
     int dx = x2 - x1;
     int dy = y2 - y1;
@@ -1882,19 +1883,19 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         switch(comp->type) {
             case RESISTOR:
                 drawResistor(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
-            break;
+                break;
             case CAPACITOR:
                 drawCapacitor(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
-            break;
+                break;
             case INDUCTOR:
                 drawInductor(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
-            break;
+                break;
             case VOLTAGE_SOURCE:
                 drawVoltageSource(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
-            break;
+                break;
             case CURRENT_SOURCE:
                 // You could add drawCurrentSource here
-                    break;
+                break;
             default:
                 renderText(comp->name, (p1.x + p2.x)/2, (p1.y + p2.y)/2, BLACK);
         }
@@ -1911,7 +1912,7 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
 }
 
 void plotSignals(SDL_Renderer* renderer, const std::vector<double>& voltages,
-                const std::vector<double>& times, const SDL_Rect& area) {
+                 const std::vector<double>& times, const SDL_Rect& area) {
     if (voltages.empty() || times.empty()) return;
 
     // Find min/max values for scaling
@@ -1979,7 +1980,7 @@ void handleProbe(int x, int y, const Circuit& circuit) {
             // Check if click is near this component
             // If yes, show voltage/current information
         }
-        }
+    }
 }
 
 void showFileMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
@@ -2178,7 +2179,7 @@ void showSaveAsDialog(SDL_Renderer* renderer, string& currentFilename) {
 }
 
 void showResultsWindow(SDL_Renderer* renderer, const vector<double>& voltages,
-                      const vector<double>& times, const Circuit& circuit) {
+                       const vector<double>& times, const Circuit& circuit) {
     SDL_Rect resultsWindow = {150, 100, 600, 500};
 
     // Window background
@@ -2282,7 +2283,7 @@ void handleComponentSelection(Circuit* circuit, int x, int y) {
                 return;
             }
         }
-        }
+    }
 }
 
 void handleMainViewClick(Circuit circuit, int x, int y) {
@@ -2373,16 +2374,16 @@ void handleMouseClick(Circuit circuit, int x, int y) {
     switch (currentState) {
         case MAIN_VIEW:
             handleMainViewClick(circuit, x, y);
-        break;
+            break;
         case COMPONENT_LIBRARY:
             handleLibraryClick(x, y);
-        break;
+            break;
         case ANALYSIS_SETTINGS:
             handleAnalysisClick(x, y);
-                break;
+            break;
         case PLOT_VIEW:
             handlePlotClick(x, y);
-        break;
+            break;
     }
 }
 
@@ -2562,6 +2563,16 @@ int main(int argc, char* argv[]) {
     TextBox node2Box = {{310, 20, 100, 40}, "Node2", false};
     TextBox valueBox = {{420, 20, 100, 40}, "Value", false};
 
+
+    Button resistorBtn = {{200, 50, 120, 40}, "Resistor", GRAY};
+    Button capacitorBtn = {{200, 100, 120, 40}, "Capacitor", GRAY};
+    Button inductorBtn = {{200, 150, 120, 40}, "Inductor", GRAY};
+    Button diodeBtn = {{200, 200, 120, 40}, "Diode", GRAY};
+    Button voltageSrcBtn = {{330, 50, 120, 40}, "Voltage Source", GRAY};
+    Button currentSrcBtn = {{330, 100, 120, 40}, "Current Source", GRAY};
+    Button groundBtn = {{330, 150, 120, 40}, "Ground", GRAY};
+
+
     while (running) {
         while (SDL_PollEvent(&event)) {
 
@@ -2569,19 +2580,19 @@ int main(int argc, char* argv[]) {
                 switch (event.key.keysym.sym) {
                     case SDLK_F5:
                         handleAnalyzeButton(circuit);
-                    break;
+                        break;
                     case SDLK_s:
                         if (SDL_GetModState() & KMOD_CTRL) {
                             handleSaveButton(circuit, currentCircuitFile);
                         }
-                    break;
+                        break;
                     case SDLK_l:
                         if (SDL_GetModState() & KMOD_CTRL) {
                             handleLoadButton(circuit, currentCircuitFile);
                         }
-                    break;
+                        break;
                     case SDLK_ESCAPE:
-                            break;
+                        break;
                 }
             }
 
@@ -2619,6 +2630,24 @@ int main(int argc, char* argv[]) {
                     node2Box.isActive = false;
                     valueBox.isActive = true;
                 }
+                    // Add to your mouse click handler
+                else if (isMouseOver(resistorBtn.rect, x, y)) {
+                    string name = "R" + to_string(rand() % 1000);
+                    circuit->addComponent(new Resistor(name,
+                                                       getOrCreateNode(node1Box.text),
+                                                       getOrCreateNode(node2Box.text),
+                                                       stod(valueBox.text)));
+                    cout << "Added resistor " << name << endl;
+                }
+                else if (isMouseOver(capacitorBtn.rect, x, y)) {
+                    string name = "C" + to_string(rand() % 1000);
+                    circuit->addComponent(new Capacitor(name,
+                                                        getOrCreateNode(node1Box.text),
+                                                        getOrCreateNode(node2Box.text),
+                                                        stod(valueBox.text)));
+                    cout << "Added capacitor " << name << endl;
+                }
+// Add similar blocks for other components...
                 else {
                     node1Box.isActive = false;
                     node2Box.isActive = false;
@@ -2689,21 +2718,30 @@ int main(int argc, char* argv[]) {
         renderTextBox(node2Box);
         renderTextBox(valueBox);
 
+
+        renderButton(resistorBtn);
+        renderButton(capacitorBtn);
+        renderButton(inductorBtn);
+        renderButton(diodeBtn);
+        renderButton(voltageSrcBtn);
+        renderButton(currentSrcBtn);
+        renderButton(groundBtn);
+
         drawToolbar(renderer);
 
         switch (currentState) {
             case MAIN_VIEW:
                 renderMainView(renderer, *circuit);
-            break;
+                break;
             case COMPONENT_LIBRARY:
                 renderComponentLibrary(renderer);
-            break;
+                break;
             case ANALYSIS_SETTINGS:
                 renderAnalysisSettings(renderer);
-            break;
+                break;
             case PLOT_VIEW:
                 renderPlotView(renderer);
-            break;
+                break;
         }
 
         drawStatusBar(renderer, "Ready");
