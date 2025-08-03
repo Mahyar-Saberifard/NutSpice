@@ -186,7 +186,12 @@ double parseSpiceValue(const string& valStr) {
 }
 
 class Component {
+
+protected:
+    int posX, posY;
 public:
+
+
     ComponentType type;
     string name;
     std::string nodeName1;
@@ -228,7 +233,16 @@ public:
             case CCCS_SOURCE: typeStr = "CCCS Source"; break;
         }
         return typeStr + " " + name + " " + getNodeName(node1) + " " + getNodeName(node2) + " " + to_string(value);
+    }    virtual void setPosition(int x, int y) {
+        posX = x;
+        posY = y;
     }
+    virtual std::pair<int,int> getPosition() {
+        return {posX, posY};
+    }
+
+    virtual std::string getType() = 0;
+
 };
 
 class Circuit {
@@ -266,7 +280,7 @@ public:
     }
 
     // Get node name from number
-    std::string getNodeName(int nodeNum) const {
+   string getNodeName(int nodeNum) const {
         if (nodeNum == 0) return "GND";
         auto it = reverseNodeMap.find(nodeNum);
         if (it != reverseNodeMap.end()) {
@@ -868,6 +882,8 @@ bool saveCircuitToFile(const Circuit& circuit, const string& filename) {
 
 class Resistor : public Component {
 public:
+
+
     Resistor(const string& n, int n1, int n2, double val) : Component(RESISTOR, n, n1, n2, val) {}
 
     void stamp(vector<vector<double>>& G,
@@ -897,6 +913,7 @@ public:
         double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
         return (v1 - v2) / value;
     }
+    string getType() override { return "Resistor"; }
 };
 
 class Capacitor : public Component {
@@ -942,6 +959,7 @@ public:
     double getCurrent(const vector<double>& nodeVoltages) const override {
         return current;
     }
+    string getType() override { return "Capacitor"; }
 };
 
 class Inductor : public Component {
@@ -990,6 +1008,8 @@ public:
     double getCurrent(const vector<double>& nodeVoltages) const override {
         return current;
     }
+
+    string getType() override { return "Inductor"; }
 };
 
 class Diode : public Component {
@@ -1057,6 +1077,8 @@ public:
     string getInfo() const override {
         return "Diode " + name + " " + getNodeName(node1) + " " + getNodeName(node2);
     }
+
+    string getType() override { return "Diode"; }
 };
 
 class Ground : public Component {
@@ -1065,6 +1087,8 @@ public:
 
     void stamp(vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&,
                vector<double>&, vector<double>&, int&) override {}
+
+    string getType() override { return "Ground"; }
 };
 
 class VoltageSource : public Component {
@@ -1088,6 +1112,7 @@ public:
 
         E[vsIndex] = value;
     }
+    string getType() override { return "VoltageSource"; }
 };
 
 class SinVoltageSource : public Component {
@@ -1125,6 +1150,8 @@ public:
                " DC=" + to_string(offset) + " AMP=" + to_string(amplitude) +
                " FREQ=" + to_string(frequency) + " PHASE=" + to_string(phase);
     }
+
+    string getType() override { return "SinVoltageSource"; }
 };
 
 class PulseVoltageSource : public Component {
@@ -1172,6 +1199,8 @@ public:
                " TR=" + to_string(tr) + " TF=" + to_string(tf) + " PW=" + to_string(pw) +
                " PER=" + to_string(per);
     }
+
+    string getType() override { return "PulseVoltageSource"; }
 };
 
 class CurrentSource : public Component {
@@ -1188,6 +1217,8 @@ public:
         if (node1 != 0) J[node1-1] -= value;
         if (node2 != 0) J[node2-1] += value;
     }
+
+    string getType() override { return "CurrentSource"; }
 };
 
 class SinCurrentSource : public Component {
@@ -1220,6 +1251,8 @@ public:
                " DC=" + to_string(offset) + " AMP=" + to_string(amplitude) +
                " FREQ=" + to_string(frequency) + " PHASE=" + to_string(phase);
     }
+
+    string getType() override { return "SinCurrentSource"; }
 };
 
 class PulseCurrentSource : public Component {
@@ -1261,6 +1294,8 @@ public:
                " TR=" + to_string(tr) + " TF=" + to_string(tf) + " PW=" + to_string(pw) +
                " PER=" + to_string(per);
     }
+
+    string getType() override { return "PulseCurrentSource"; }
 };
 
 class VCVS : public Component {
@@ -1286,6 +1321,8 @@ public:
         if (ctrlNode1 != 0) D[vsIndex][ctrlNode1 - 1] -= value;
         if (ctrlNode2 != 0) D[vsIndex][ctrlNode2 - 1] += value;
     }
+
+    string getType() override { return "VCVS"; }
 };
 
 class CCVS : public Component {
@@ -1315,6 +1352,8 @@ public:
 
         D[vsIndex][controllingSourceIndex] = -value;
     }
+
+    string getType() override { return "CCVS"; }
 };
 
 class VCCS : public Component {
@@ -1335,6 +1374,7 @@ public:
         if (node2 != 0 && ctrlNode1 != 0) G[node2 - 1][ctrlNode1 - 1] -= value;
         if (node2 != 0 && ctrlNode2 != 0) G[node2 - 1][ctrlNode2 - 1] += value;
     }
+    string getType() override { return "VCCS"; }
 };
 
 class CCCS : public Component {
@@ -1358,7 +1398,10 @@ public:
         if (node1 != 0) D[node1 - 1][controllingSourceIndex] += value;
         if (node2 != 0) D[node2 - 1][controllingSourceIndex] -= value;
     }
+
+    string getType() override { return "CCCS"; }
 };
+
 
 void processCircuitFile(const string& filename, Circuit& circuit) {
     ifstream file(filename);
@@ -1646,6 +1689,13 @@ Button fileBtn = {10, 5, 80, 30, "File", GRAY};
 Button componentLibBtn = {100, 5, 80, 30, "Components", GRAY};
 Button analyzeBtn = {190, 5, 80, 30, "Analyze", GRAY};
 Button plotBtn = {280, 5, 80, 30, "Plot", BLUE};
+Button addBtn;
+Button cancelBtn;
+TextBox nameBox;
+TextBox node1Box;
+TextBox node2Box;
+TextBox valueBox;
+
 
 bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -1962,12 +2012,20 @@ void showAnalysisDialog(SDL_Renderer* renderer, double& tStep, double& tStop) {
 
 enum AppState {
     MAIN_VIEW,
+    ADD_COMPONENT_DIALOG,
+    ADDING_COMPONENT,
     COMPONENT_LIBRARY,
     ANALYSIS_SETTINGS,
     PLOT_VIEW
 };
 
+string selectedComponentType = "";
 AppState currentState = MAIN_VIEW;
+
+// دکمه‌ها رو هم باید داشته باشی مثلا
+SDL_Rect resistorBtn = {10, 10, 100, 30};  // x, y, width, height
+SDL_Rect capacitorBtn = {120, 10, 100, 30};
+// ... تعریف بقیه دکمه‌ها
 
 void handleProbe(int x, int y, const Circuit& circuit) {
     // Check if click is in circuit area
@@ -2304,25 +2362,17 @@ void handleMainViewClick(Circuit circuit, int x, int y) {
 }
 
 void handleLibraryClick(int x, int y) {
-    SDL_Rect libWindow = {200, 100, 400, 500};
-
-    // Check close button
-    SDL_Rect closeBtn = {libWindow.x + libWindow.w - 40, libWindow.y + 10, 30, 30};
-    if (isMouseOver(closeBtn, x, y)) {
-        currentState = MAIN_VIEW;
-        return;
+    if (x >= resistorBtn.x && x <= resistorBtn.x + resistorBtn.w &&
+        y >= resistorBtn.y && y <= resistorBtn.y + resistorBtn.h) {
+        selectedComponentType = "Resistor";
+        currentState = ADDING_COMPONENT;
     }
-
-    // Check category clicks
-    for (int i = 0; i < 4; i++) {
-        SDL_Rect catRect = {libWindow.x + 20, libWindow.y + 60 + i*60, 360, 50};
-        if (isMouseOver(catRect, x, y)) {
-            cout << "Selected category: " << i << endl;
-            // Here you would add the selected component to the circuit
-            currentState = MAIN_VIEW;
-            break;
-        }
+    else if (x >= capacitorBtn.x && x <= capacitorBtn.x + capacitorBtn.w &&
+             y >= capacitorBtn.y && y <= capacitorBtn.y + capacitorBtn.h) {
+        selectedComponentType = "Capacitor";
+        currentState = ADDING_COMPONENT;
     }
+    // ... بقیه دکمه‌ها
 }
 
 void handlePlotClick(int x, int y) {
@@ -2370,20 +2420,77 @@ void handleAnalysisClick(int x, int y) {
     }
 }
 
-void handleMouseClick(Circuit circuit, int x, int y) {
+
+void handleAddComponentClick(Circuit& circuit, int x, int y) {
+    // فرض کن قبلاً دکمه‌ها مثل addBtn تعریف شدن و موقعیت‌شون معلومه
+
+    if (isMouseOver(addBtn.rect, x, y)) {
+        string name = nameBox.text;
+        int node1 = std::stoi(node1Box.text);
+        int node2 = std::stoi(node2Box.text);
+        double value = std::stod(valueBox.text);
+
+        Component* newComp = nullptr;
+
+        if (selectedComponentType == "Resistor")
+            newComp = new Resistor(name, node1, node2, value);
+        else if (selectedComponentType == "Capacitor")
+            newComp = new Capacitor(name, node1, node2, value);
+        else if (selectedComponentType == "Inductor")
+            newComp = new Inductor(name, node1, node2, value);
+        else if (selectedComponentType == "VoltageSource")
+            newComp = new VoltageSource(name, node1, node2, value);
+        else if (selectedComponentType == "CurrentSource")
+            newComp = new CurrentSource(name, node1, node2, value);
+        else if (selectedComponentType == "Diode")
+            newComp = new Diode(name, node1, node2); // اگه فقط دو پین داره
+        else if (selectedComponentType == "Ground")
+            newComp = new Ground(name, node1); // اگه فقط یک نود داره
+
+        if (newComp) {
+            circuit.addComponent(newComp);
+            currentState = MAIN_VIEW; // برگرد به نمای اصلی
+        }
+    }
+
+    if (isMouseOver(cancelBtn.rect, x, y)) {
+        currentState = MAIN_VIEW; // فقط بستن دیالوگ
+    }
+}
+
+void addComponentAtPosition(Circuit& circuit, int x, int y) {
+    static int compCount = 1;
+
+    std::string name = selectedComponentType.substr(0,1) + std::to_string(compCount++);
+    int node1 = 0; // فعلاً فرض کن گره‌ها رو ساده نگه می‌داریم
+    int node2 = 1;
+
+    Component* newComp = nullptr;
+
+    if (selectedComponentType == "Resistor") {
+        newComp = new Resistor(name, node1, node2, 1000.0); // مقدار ۱۰۰۰ اهم پیش‌فرض
+    }
+    else if (selectedComponentType == "Capacitor") {
+        newComp = new Capacitor(name, node1, node2, 1e-6);
+    }
+    // ... بقیه کامپوننت‌ها
+
+    if (newComp) {
+        newComp->setPosition(x, y); // باید این متد رو در Component و فرزندانش داشته باشی
+        circuit.addComponent(newComp);
+    }
+}
+
+void handleMouseClick(Circuit& circuit, int x, int y) {
     switch (currentState) {
         case MAIN_VIEW:
             handleMainViewClick(circuit, x, y);
             break;
-        case COMPONENT_LIBRARY:
-            handleLibraryClick(x, y);
+        case ADDING_COMPONENT:
+            addComponentAtPosition(circuit, x, y);
+            currentState = MAIN_VIEW;  // برگشت به حالت عادی
             break;
-        case ANALYSIS_SETTINGS:
-            handleAnalysisClick(x, y);
-            break;
-        case PLOT_VIEW:
-            handlePlotClick(x, y);
-            break;
+            // بقیه حالت‌ها ...
     }
 }
 
@@ -2533,6 +2640,101 @@ void renderPlotView(SDL_Renderer* renderer) {
     renderButton(backBtn);
 }
 
+void showAddComponentDialog(SDL_Renderer* renderer, Circuit& circuit) {
+    SDL_Rect dialogRect = {300, 200, 400, 400};
+
+    // Draw dialog background
+    SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+    SDL_RenderFillRect(renderer, &dialogRect);
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawRect(renderer, &dialogRect);
+
+    // Title
+    renderText("Add Component", dialogRect.x + 20, dialogRect.y + 20, BLACK);
+
+    // Component type selection
+    renderText("Component Type:", dialogRect.x + 20, dialogRect.y + 60, BLACK);
+
+    // Create buttons for each component type
+    Button resistorBtn = {dialogRect.x + 150, dialogRect.y + 60, 100, 30, "Resistor", GRAY};
+    Button capacitorBtn = {dialogRect.x + 260, dialogRect.y + 60, 100, 30, "Capacitor", GRAY};
+    Button inductorBtn = {dialogRect.x + 150, dialogRect.y + 100, 100, 30, "Inductor", GRAY};
+    Button voltageSrcBtn = {dialogRect.x + 260, dialogRect.y + 100, 100, 30, "V Source", GRAY};
+    Button currentSrcBtn = {dialogRect.x + 150, dialogRect.y + 140, 100, 30, "I Source", GRAY};
+    Button diodeBtn = {dialogRect.x + 260, dialogRect.y + 140, 100, 30, "Diode", GRAY};
+    Button groundBtn = {dialogRect.x + 150, dialogRect.y + 180, 100, 30, "Ground", GRAY};
+
+    // Draw all buttons
+    renderButton(resistorBtn);
+    renderButton(capacitorBtn);
+    renderButton(inductorBtn);
+    renderButton(voltageSrcBtn);
+    renderButton(currentSrcBtn);
+    renderButton(diodeBtn);
+    renderButton(groundBtn);
+
+    // Input fields
+    renderText("Name:", dialogRect.x + 20, dialogRect.y + 220, BLACK);
+    static TextBox nameBox = {dialogRect.x + 100, dialogRect.y + 220, 150, 30, "R1", false};
+
+    renderText("Node 1:", dialogRect.x + 20, dialogRect.y + 260, BLACK);
+    static TextBox node1Box = {dialogRect.x + 100, dialogRect.y + 260, 150, 30, "1", false};
+
+    renderText("Node 2:", dialogRect.x + 20, dialogRect.y + 300, BLACK);
+    static TextBox node2Box = {dialogRect.x + 100, dialogRect.y + 300, 150, 30, "2", false};
+
+    renderText("Value:", dialogRect.x + 20, dialogRect.y + 340, BLACK);
+    static TextBox valueBox = {dialogRect.x + 100, dialogRect.y + 340, 150, 30, "1000", false};
+
+    // Draw input boxes
+    renderTextBox(nameBox);
+    renderTextBox(node1Box);
+    renderTextBox(node2Box);
+    renderTextBox(valueBox);
+
+    // Action buttons
+    Button addBtn = {dialogRect.x + 100, dialogRect.y + 380, 100, 30, "Add", GREEN};
+    Button cancelBtn = {dialogRect.x + 220, dialogRect.y + 380, 100, 30, "Cancel", RED};
+    renderButton(addBtn);
+    renderButton(cancelBtn);
+
+    // Handle mouse clicks (you'll need to implement this in your event loop)
+    // When a component type button is clicked, update the name prefix (R, C, L, etc.)
+    // When Add is clicked, create the component and add it to the circuit
+}
+
+
+void drawComponent(SDL_Renderer* renderer, Component* comp) {
+    std::pair<int, int> pos = comp->getPosition();
+    int x = pos.first;
+    int y = pos.second;
+    std::string type = comp->getType();
+
+    SDL_Rect rect = { x - 20, y - 10, 40, 20 }; // مستطیل فرضی برای نمایش
+
+    if (type == "Resistor") {
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // قرمز
+        SDL_RenderFillRect(renderer, &rect);
+    }
+    else if (type == "Capacitor") {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255); // آبی
+        SDL_RenderFillRect(renderer, &rect);
+    }
+    // می‌تونی بقیه نوع‌ها رو هم اضافه کنی
+}
+
+void renderCircuit(SDL_Renderer* renderer, Circuit& circuit, TTF_Font* font) {
+    for (auto comp : circuit.getComponents()) {
+        drawComponent(renderer, comp);
+
+        std::pair<int, int> pos = comp->getPosition();
+        int x = pos.first;
+        int y = pos.second;
+
+
+    }
+}
+
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
 
@@ -2596,9 +2798,20 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+
             if (event.type == SDL_MOUSEBUTTONDOWN) {
                 int x, y;
                 SDL_GetMouseState(&x, &y);
+
+
+
+                if (isMouseOver(resistorBtn.rect, x, y)) selectedComponentType = "Resistor";
+                else if (isMouseOver(capacitorBtn.rect, x, y)) selectedComponentType = "Capacitor";
+                else if (isMouseOver(inductorBtn.rect, x, y)) selectedComponentType = "Inductor";
+                else if (isMouseOver(voltageSrcBtn.rect, x, y)) selectedComponentType = "VoltageSource";
+                else if (isMouseOver(currentSrcBtn.rect, x, y)) selectedComponentType = "CurrentSource";
+                else if (isMouseOver(diodeBtn.rect, x, y)) selectedComponentType = "Diode";
+                else if (isMouseOver(groundBtn.rect, x, y)) selectedComponentType = "Ground";
 
                 if (y <= 40) {
                     handleToolbarButton(x, y);
