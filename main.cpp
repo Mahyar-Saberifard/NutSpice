@@ -1,4 +1,5 @@
 #include <iostream>
+#include <map>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -10,6 +11,8 @@
 #include <SDL2/SDL.h>
 #include <windows.h>
 #include <direct.h>
+#include <SDL2/SDL2_gfx.h>
+#include <SDL2/SDL_ttf.h>
 
 using namespace std;
 
@@ -76,6 +79,14 @@ vector<double> Itimes;
 bool hasDynamic = false;
 bool showVoltage = true;
 bool showCurrent = false;
+bool FileMenu = false;
+bool EditMenu = false;
+bool ComponentLibrary = false;
+bool AnalysisSettings = false;
+
+double tStep = 0.001;
+double tStop = 0.1;
+std::map<int, SDL_Point> nodePositions;
 
 enum ComponentType {
     RESISTOR,
@@ -146,8 +157,8 @@ double parseSpiceValue(const string& valStr) {
     size_t suffixPos = 0;
     while (suffixPos < valStr.size() &&
            (isdigit(valStr[suffixPos]) || valStr[suffixPos] == '.' ||
-           valStr[suffixPos] == '-' || valStr[suffixPos] == '+' ||
-           valStr[suffixPos] == 'e' || valStr[suffixPos] == 'E')) {
+            valStr[suffixPos] == '-' || valStr[suffixPos] == '+' ||
+            valStr[suffixPos] == 'e' || valStr[suffixPos] == 'E')) {
         suffixPos++;
     }
 
@@ -174,9 +185,16 @@ double parseSpiceValue(const string& valStr) {
 }
 
 class Component {
+
+protected:
+    int posX, posY;
 public:
+
+
     ComponentType type;
     string name;
+    std::string nodeName1;
+    std::string nodeName2;
     int node1, node2;
     double value;
 
@@ -214,7 +232,16 @@ public:
             case CCCS_SOURCE: typeStr = "CCCS Source"; break;
         }
         return typeStr + " " + name + " " + getNodeName(node1) + " " + getNodeName(node2) + " " + to_string(value);
+    }    virtual void setPosition(int x, int y) {
+        posX = x;
+        posY = y;
     }
+    virtual std::pair<int,int> getPosition() {
+        return {posX, posY};
+    }
+
+    virtual std::string getType() = 0;
+
 };
 
 class Circuit {
@@ -222,6 +249,9 @@ class Circuit {
     int maxNode;
     static double currentTimeStep;
     static double currentTime;
+    std::map<std::string, int> nodeMap;          // Maps node names to numbers
+    std::map<int, std::string> reverseNodeMap;   // Maps node numbers to names
+    int nextNodeNumber = 1;                      // Next available node number
 
 public:
     Circuit() : maxNode(0) {}
@@ -230,6 +260,42 @@ public:
         for (auto comp : components) {
             delete comp;
         }
+    }
+
+    // Add or get a node number for a given name
+    int getOrCreateNode(const std::string& name) {
+        if (name == "GND" || name == "0") return 0;  // Ground is always node 0
+
+        auto it = nodeMap.find(name);
+        if (it != nodeMap.end()) {
+            return it->second;
+        }
+
+        // Assign new node number
+        int nodeNum = nextNodeNumber++;
+        nodeMap[name] = nodeNum;
+        reverseNodeMap[nodeNum] = name;
+        return nodeNum;
+    }
+
+    // Get node name from number
+   string getNodeName(int nodeNum) const {
+        if (nodeNum == 0) return "GND";
+        auto it = reverseNodeMap.find(nodeNum);
+        if (it != reverseNodeMap.end()) {
+            return it->second;
+        }
+        return "UNKNOWN";
+    }
+
+    // Get all nodes as name-number pairs
+    const std::map<std::string, int>& getNodeMap() const {
+        return nodeMap;
+    }
+
+    // Get all nodes as number-name pairs
+    const std::map<int, std::string>& getReverseNodeMap() const {
+        return reverseNodeMap;
     }
 
     bool hasComponent(const string& name) const {
@@ -250,10 +316,29 @@ public:
         return false;
     }
 
+    const vector<Component*>& getComponents() const {
+        return components;
+    }
+
+    // Keep the old listComponents for text output if needed
+    vector<string> listComponents(ComponentType filterType = static_cast<ComponentType>(-1)) const {
+        vector<string> result;
+        for (const auto& comp : components) {
+            if (filterType == static_cast<ComponentType>(-1) || comp->type == filterType) {
+                result.push_back(comp->getInfo());
+            }
+        }
+        return result;
+    }
+
     void addComponent(Component* comp) {
         if (hasComponent(comp->name)) {
             throw runtime_error("Error: Component " + comp->name + " already exists in the circuit");
         }
+
+        // Convert node names to numbers
+        comp->node1 = getOrCreateNode(comp->nodeName1);
+        comp->node2 = getOrCreateNode(comp->nodeName2);
 
         if ((comp->type == RESISTOR || comp->type == CAPACITOR || comp->type == INDUCTOR) &&
             comp->value <= 0) {
@@ -262,7 +347,7 @@ public:
             else if (comp->type == CAPACITOR) typeStr = "Capacitor";
             else typeStr = "Inductor";
             throw runtime_error("Error: " + typeStr + " value must be positive");
-            }
+        }
 
         components.push_back(comp);
         if (comp->node1 > maxNode) maxNode = comp->node1;
@@ -342,7 +427,7 @@ public:
         return false;
     }
 
-    vector<string> listComponents(ComponentType filterType = static_cast<ComponentType>(-1)) const {
+    /*vector<string> listComponents(ComponentType filterType = static_cast<ComponentType>(-1)) const {
         vector<string> result;
         for (const auto& comp : components) {
             if (filterType == static_cast<ComponentType>(-1) || comp->type == filterType) {
@@ -350,7 +435,7 @@ public:
             }
         }
         return result;
-    }
+    }*/
 
     vector<string> listNodes() const {
         vector<string> nodes;
@@ -496,98 +581,98 @@ public:
     }
 
     void analyzeTransient(double tStep, double tStop) {
-    currentTimeStep = tStep;
-    double t = 0.0;
+        currentTimeStep = tStep;
+        double t = 0.0;
 
-    voltages.clear();
-    currents.clear();
-    Vtimes.clear();
-    Itimes.clear();
+        voltages.clear();
+        currents.clear();
+        Vtimes.clear();
+        Itimes.clear();
 
-    if (!hasGround()) {
-        throw runtime_error("Error: No ground node detected in the circuit");
-    }
-
-    if (maxNode < 1) {
-        throw runtime_error("Error: Circuit must have at least one non-ground node");
-    }
-
-    int numNodes = maxNode;
-    int numVSources = 0;
-    int numInductors = 0;
-
-    for (auto comp : components) {
-        if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
-            comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
-        if (comp->type == INDUCTOR) numInductors++;
-    }
-
-    int numVars = numNodes + numVSources + numInductors;
-
-    while (t <= tStop) {
-        vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
-        vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
-        vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
-        vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
-        vector<double> J(numNodes, 0.0);
-        vector<double> E(numVSources + numInductors, 0.0);
-
-        for (int i = 0; i < numNodes; i++) {
-            G[i][i] = 1e-12;
+        if (!hasGround()) {
+            throw runtime_error("Error: No ground node detected in the circuit");
         }
 
-        int vsCount = 0;
-        currentTime = t;
+        if (maxNode < 1) {
+            throw runtime_error("Error: Circuit must have at least one non-ground node");
+        }
+
+        int numNodes = maxNode;
+        int numVSources = 0;
+        int numInductors = 0;
+
         for (auto comp : components) {
-            comp->stamp(G, B, C, D, J, E, vsCount);
+            if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
+                comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
+            if (comp->type == INDUCTOR) numInductors++;
         }
 
-        vector<double> x;
-        try {
-            vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
-            vector<double> b(numVars, 0.0);
+        int numVars = numNodes + numVSources + numInductors;
+
+        while (t <= tStop) {
+            vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
+            vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
+            vector<vector<double>> C(numVSources + numInductors, vector<double>(numNodes, 0.0));
+            vector<vector<double>> D(numVSources + numInductors, vector<double>(numVSources + numInductors, 0.0));
+            vector<double> J(numNodes, 0.0);
+            vector<double> E(numVSources + numInductors, 0.0);
 
             for (int i = 0; i < numNodes; i++) {
-                for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
-                for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
-                b[i] = J[i];
-            }
-            for (int i = 0; i < numVSources + numInductors; i++) {
-                for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
-                for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
-                b[numNodes + i] = E[i];
+                G[i][i] = 1e-12;
             }
 
-            x = solveSystem(A, b);
+            int vsCount = 0;
+            currentTime = t;
+            for (auto comp : components) {
+                comp->stamp(G, B, C, D, J, E, vsCount);
+            }
 
-            for (int i = 0; i < numNodes; i++) {
-                Vtimes.push_back(t);
-                voltages.push_back(x[i]);
+            vector<double> x;
+            try {
+                vector<vector<double>> A(numVars, vector<double>(numVars, 0.0));
+                vector<double> b(numVars, 0.0);
+
+                for (int i = 0; i < numNodes; i++) {
+                    for (int j = 0; j < numNodes; j++) A[i][j] = G[i][j];
+                    for (int j = 0; j < numVSources + numInductors; j++) A[i][numNodes + j] = B[i][j];
+                    b[i] = J[i];
+                }
+                for (int i = 0; i < numVSources + numInductors; i++) {
+                    for (int j = 0; j < numNodes; j++) A[numNodes + i][j] = C[i][j];
+                    for (int j = 0; j < numVSources + numInductors; j++) A[numNodes + i][numNodes + j] = D[i][j];
+                    b[numNodes + i] = E[i];
+                }
+
+                x = solveSystem(A, b);
+
+                for (int i = 0; i < numNodes; i++) {
+                    Vtimes.push_back(t);
+                    voltages.push_back(x[i]);
+                }
+
+                for (auto comp : components) {
+                    if (comp->type == RESISTOR || comp->type == CAPACITOR ||
+                        comp->type == INDUCTOR || comp->type == DIODE) {
+                        Itimes.push_back(t);
+                        currents.push_back(comp->getCurrent(x));
+                    }
+                }
+
+            } catch (const runtime_error& e) {
+                cerr << "Error at t=" << t << ": " << e.what() << endl;
+                break;
             }
 
             for (auto comp : components) {
-                if (comp->type == RESISTOR || comp->type == CAPACITOR ||
-                    comp->type == INDUCTOR || comp->type == DIODE) {
-                    Itimes.push_back(t);
-                    currents.push_back(comp->getCurrent(x));
-                }
+                comp->update(tStep, x);
             }
 
-        } catch (const runtime_error& e) {
-            cerr << "Error at t=" << t << ": " << e.what() << endl;
-            break;
+            t += tStep;
         }
-
-        for (auto comp : components) {
-            comp->update(tStep, x);
-        }
-
-        t += tStep;
     }
-}
 
     void printTransientResults(const vector<double>& times, const vector<double>& voltages,
-                      const vector<double>& currents, int numNodes) {
+                               const vector<double>& currents, int numNodes) {
         cout << "\nTransient Analysis Results:\n";
         cout << "--------------------------\n";
 
@@ -618,7 +703,7 @@ public:
                         cout << comp->name << ": " << currents[currentIndex] << "\t";
                         currentIndex++;
                     }
-                    }
+                }
             }
             cout << "\n";
         }
@@ -748,6 +833,7 @@ public:
 
 double Circuit::currentTimeStep = 0.0;
 double Circuit::currentTime = 0.0;
+Component* selectedComponent = nullptr;
 
 bool saveCircuitToFile(const Circuit& circuit, const string& filename) {
     string actualFilename = filename;
@@ -795,6 +881,8 @@ bool saveCircuitToFile(const Circuit& circuit, const string& filename) {
 
 class Resistor : public Component {
 public:
+
+
     Resistor(const string& n, int n1, int n2, double val) : Component(RESISTOR, n, n1, n2, val) {}
 
     void stamp(vector<vector<double>>& G,
@@ -824,6 +912,7 @@ public:
         double v2 = (node2 == 0) ? 0 : nodeVoltages[node2-1];
         return (v1 - v2) / value;
     }
+    string getType() override { return "Resistor"; }
 };
 
 class Capacitor : public Component {
@@ -831,7 +920,7 @@ class Capacitor : public Component {
     double current;
 public:
     Capacitor(const string& n, int n1, int n2, double val)
-        : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0), current(0.0) {}
+            : Component(CAPACITOR, n, n1, n2, val), prevVoltage(0.0), current(0.0) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>&,
@@ -869,6 +958,7 @@ public:
     double getCurrent(const vector<double>& nodeVoltages) const override {
         return current;
     }
+    string getType() override { return "Capacitor"; }
 };
 
 class Inductor : public Component {
@@ -917,6 +1007,8 @@ public:
     double getCurrent(const vector<double>& nodeVoltages) const override {
         return current;
     }
+
+    string getType() override { return "Inductor"; }
 };
 
 class Diode : public Component {
@@ -984,6 +1076,8 @@ public:
     string getInfo() const override {
         return "Diode " + name + " " + getNodeName(node1) + " " + getNodeName(node2);
     }
+
+    string getType() override { return "Diode"; }
 };
 
 class Ground : public Component {
@@ -992,6 +1086,8 @@ public:
 
     void stamp(vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&, vector<vector<double>>&,
                vector<double>&, vector<double>&, int&) override {}
+
+    string getType() override { return "Ground"; }
 };
 
 class VoltageSource : public Component {
@@ -1015,6 +1111,7 @@ public:
 
         E[vsIndex] = value;
     }
+    string getType() override { return "VoltageSource"; }
 };
 
 class SinVoltageSource : public Component {
@@ -1024,8 +1121,8 @@ class SinVoltageSource : public Component {
     double offset;
 public:
     SinVoltageSource(const string& n, int n1, int n2, double amp, double freq, double ph = 0.0, double off = 0.0)
-        : Component(SIN_VOLTAGE_SOURCE, n, n1, n2, 0.0),
-          amplitude(amp), frequency(freq), phase(ph), offset(off) {}
+            : Component(SIN_VOLTAGE_SOURCE, n, n1, n2, 0.0),
+              amplitude(amp), frequency(freq), phase(ph), offset(off) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>& B,
@@ -1052,15 +1149,17 @@ public:
                " DC=" + to_string(offset) + " AMP=" + to_string(amplitude) +
                " FREQ=" + to_string(frequency) + " PHASE=" + to_string(phase);
     }
+
+    string getType() override { return "SinVoltageSource"; }
 };
 
 class PulseVoltageSource : public Component {
     double v1, v2, td, tr, tf, pw, per;
 public:
     PulseVoltageSource(const string& n, int n1, int n2, double v1, double v2,
-                      double td, double tr, double tf, double pw, double per)
-        : Component(PULSE_VOLTAGE_SOURCE, n, n1, n2, 0.0),
-          v1(v1), v2(v2), td(td), tr(tr), tf(tf), pw(pw), per(per) {}
+                       double td, double tr, double tf, double pw, double per)
+            : Component(PULSE_VOLTAGE_SOURCE, n, n1, n2, 0.0),
+              v1(v1), v2(v2), td(td), tr(tr), tf(tf), pw(pw), per(per) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>& B,
@@ -1099,6 +1198,8 @@ public:
                " TR=" + to_string(tr) + " TF=" + to_string(tf) + " PW=" + to_string(pw) +
                " PER=" + to_string(per);
     }
+
+    string getType() override { return "PulseVoltageSource"; }
 };
 
 class CurrentSource : public Component {
@@ -1115,6 +1216,8 @@ public:
         if (node1 != 0) J[node1-1] -= value;
         if (node2 != 0) J[node2-1] += value;
     }
+
+    string getType() override { return "CurrentSource"; }
 };
 
 class SinCurrentSource : public Component {
@@ -1147,6 +1250,8 @@ public:
                " DC=" + to_string(offset) + " AMP=" + to_string(amplitude) +
                " FREQ=" + to_string(frequency) + " PHASE=" + to_string(phase);
     }
+
+    string getType() override { return "SinCurrentSource"; }
 };
 
 class PulseCurrentSource : public Component {
@@ -1188,6 +1293,8 @@ public:
                " TR=" + to_string(tr) + " TF=" + to_string(tf) + " PW=" + to_string(pw) +
                " PER=" + to_string(per);
     }
+
+    string getType() override { return "PulseCurrentSource"; }
 };
 
 class VCVS : public Component {
@@ -1213,6 +1320,8 @@ public:
         if (ctrlNode1 != 0) D[vsIndex][ctrlNode1 - 1] -= value;
         if (ctrlNode2 != 0) D[vsIndex][ctrlNode2 - 1] += value;
     }
+
+    string getType() override { return "VCVS"; }
 };
 
 class CCVS : public Component {
@@ -1242,6 +1351,8 @@ public:
 
         D[vsIndex][controllingSourceIndex] = -value;
     }
+
+    string getType() override { return "CCVS"; }
 };
 
 class VCCS : public Component {
@@ -1262,6 +1373,7 @@ public:
         if (node2 != 0 && ctrlNode1 != 0) G[node2 - 1][ctrlNode1 - 1] -= value;
         if (node2 != 0 && ctrlNode2 != 0) G[node2 - 1][ctrlNode2 - 1] += value;
     }
+    string getType() override { return "VCCS"; }
 };
 
 class CCCS : public Component {
@@ -1285,6 +1397,8 @@ public:
         if (node1 != 0) D[node1 - 1][controllingSourceIndex] += value;
         if (node2 != 0) D[node2 - 1][controllingSourceIndex] -= value;
     }
+
+    string getType() override { return "CCCS"; }
 };
 
 void processCircuitFile(const string& filename, Circuit& circuit) {
@@ -1540,411 +1654,1502 @@ void showCircuitHelp() {
     cout << "------------------------------------\n";
 }
 
+SDL_Window* window = nullptr;
+SDL_Renderer* renderer = nullptr;
+const int SCREEN_WIDTH = 1280;
+const int SCREEN_HEIGHT = 720;
+
+const SDL_Color WHITE = {255, 255, 255, 255};
+const SDL_Color BLACK = {0, 0, 0, 255};
+const SDL_Color RED = {255, 0, 0, 255};
+const SDL_Color GREEN = {0, 255, 0, 255};
+const SDL_Color BLUE = {0, 0, 255, 255};
+const SDL_Color GRAY = {200, 200, 200, 255};
+
+TTF_Font* font = nullptr;
+
+struct Button {
+    SDL_Rect rect;
+    string text;
+    SDL_Color color;
+    bool isActive;
+};
+
+struct TextBox {
+    SDL_Rect rect;
+    string text;
+    bool isActive;
+};
+
+SDL_Rect circuitArea = {50, 50, 800, 600};
+SDL_Rect plotArea = {850, 50, 380, 600};
+SDL_Rect fileMenuRect = {10, 45, 140, 250};
+SDL_Rect editMenuRect = {100, 45, 140, 250};
+
+TextBox node1Box = {{10, SCREEN_HEIGHT - 60, 100, 40}, "Node1", false};
+TextBox node2Box = {{120, SCREEN_HEIGHT - 60, 100, 40}, "Node2", false};
+TextBox valueBox = {{230, SCREEN_HEIGHT - 60, 100, 40}, "Value", false};
+
+// Add these near your other button definitions
+Button passiveBtn = {870, 50, 120, 40, "Passives", GRAY};
+Button sourcesBtn = {870, 100, 120, 40, "Sources", GRAY};
+Button semiBtn = {870, 150, 120, 40, "Semiconductors", GRAY};
+Button depBtn = {870, 200, 120, 40, "Dependent", GRAY};
+
+// Component buttons - we'll show these when a category is selected
+Button resBtn = {870, 100, 120, 40, "Resistor", GRAY};
+Button capBtn = {870, 150, 120, 40, "Capacitor", GRAY};
+Button indBtn = {870, 200, 120, 40, "Inductor", GRAY};
+Button diodeBtn = {870, 250, 120, 40, "Diode", GRAY};
+Button vSrcBtn = {1000, 100, 120, 40, "V Source", GRAY};
+Button iSrcBtn = {1000, 150, 120, 40, "I Source", GRAY};
+Button gndBtn = {1000, 200, 120, 40, "Ground", GRAY};
+Button vcvsBtn = {1000, 250, 120, 40, "VCVS", GRAY};
+Button vccsBtn = {1000, 300, 120, 40, "VCCS", GRAY};
+Button ccvsBtn = {1000, 350, 120, 40, "CCVS", GRAY};
+Button cccsBtn = {1000, 400, 120, 40, "CCCS", GRAY};
+
+// Add these state variables
+bool showPassives = false;
+bool showSources = false;
+bool showSemis = false;
+bool showDependents = false;
+
+Button fileBtn = {10, 5, 80, 30, "File", GRAY};
+Button componentLibBtn = {100, 5, 80, 30, "Components", GRAY};
+Button plotBtn = {280, 5, 80, 30, "Plot", BLUE};
+Button addBtn;
+Button cancelBtn;
+TextBox nameBox;
+
+
+bool initSDL() {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
+        return false;
+    }
+
+    if (TTF_Init() == -1) {
+        std::cerr << "SDL_ttf could not initialize! TTF_Error: " << TTF_GetError() << std::endl;
+        return false;
+    }
+
+    window = SDL_CreateWindow("Circuit Simulator", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+                              SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
+    if (!window) {
+        std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << std::endl;
+        return false;
+    }
+
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer) {
+        std::cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << std::endl;
+        return false;
+    }
+
+    font = TTF_OpenFont("C:\\Windows\\Fonts\\consola.ttf", 24);
+    if (!font) {
+        std::cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+void renderText(const std::string& text, int x, int y, SDL_Color color) {
+    SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_Rect rect = {x, y, surface->w, surface->h};
+    SDL_RenderCopy(renderer, texture, nullptr, &rect);
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
+
+void renderButton(const Button& button) {
+    SDL_SetRenderDrawColor(renderer, button.color.r, button.color.g, button.color.b, 255);
+    SDL_RenderFillRect(renderer, &button.rect);
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawRect(renderer, &button.rect);
+    renderText(button.text, button.rect.x + 5, button.rect.y + 5, BLACK);
+}
+
+void renderTextBox(const TextBox& box) {
+    SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, 255);
+    SDL_RenderFillRect(renderer, &box.rect);
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawRect(renderer, &box.rect);
+    if (box.text == "") {
+        return;
+    }
+    renderText(box.text, box.rect.x + 5, box.rect.y + 5, BLACK);
+}
+
+void calculateNodePositions(const Circuit& circuit) {
+    nodePositions.clear();
+
+    int xSpacing = 100;
+    int yPos = 100;
+    int xStart = 100;
+
+    for (const auto& node : circuit.getNodeMap()) {
+        int nodeNum = node.second;
+        nodePositions[nodeNum] = {xStart + (nodeNum * xSpacing), yPos};
+    }
+
+    if (circuit.getNodeMap().count("GND") || circuit.getNodeMap().count("0")) {
+        nodePositions[0] = {xStart, yPos + 100};  // Position ground below others
+    }
+}
+
+void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
+                            int& outX1, int& outY1, int& outX2, int& outY2) {
+    int dx = x2 - x1;
+    int dy = y2 - y1;
+
+    float length = sqrt(dx*dx + dy*dy);
+    float nx = -dy/length;
+    float ny = dx/length;
+
+    outX1 = x1 + nx * offset;
+    outY1 = y1 + ny * offset;
+    outX2 = x2 + nx * offset;
+    outY2 = y2 + ny * offset;
+}
+
+void drawResistor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
+    const int segments = 5;
+    const int amplitude = 10;
+
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float length = sqrt(dx*dx + dy*dy);
+
+    dx /= length;
+    dy /= length;
+    float px = -dy;
+    float py = dx;
+
+    SDL_Point points[segments + 1];
+    for (int i = 0; i <= segments; i++) {
+        float t = (float)i / segments;
+        float x = x1 + t * (x2 - x1);
+        float y = y1 + t * (y2 - y1);
+
+        float offset = (i % 2) ? amplitude : -amplitude;
+        points[i].x = x + px * offset;
+        points[i].y = y + py * offset;
+    }
+
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawLines(renderer, points, segments + 1);
+
+    renderText(name, (x1 + x2)/2 + px * amplitude*2, (y1 + y2)/2 + py * amplitude*2, BLACK);
+}
+
+void drawCapacitor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
+    const int gap = 12;
+
+    int px1, py1, px2, py2;
+    getPerpendicularPoints(x1, y1, x2, y2, gap/2, px1, py1, px2, py2);
+    int nx1, ny1, nx2, ny2;
+    getPerpendicularPoints(x1, y1, x2, y2, -gap/2, nx1, ny1, nx2, ny2);
+
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawLine(renderer, px1, py1, px2, py2);
+    SDL_RenderDrawLine(renderer, nx1, ny1, nx2, ny2);
+
+    renderText(name, (x1 + x2)/2, (y1 + y2)/2 - gap, BLACK);
+}
+
+void drawInductor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
+    const int loops = 3;
+    const int radius = 8;
+
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float length = sqrt(dx*dx + dy*dy);
+    dx /= length;
+    dy /= length;
+    float px = -dy;
+    float py = dx;
+
+    float segmentLength = length / (loops * 2);
+    for (int i = 0; i < loops; i++) {
+        float centerX = x1 + dx * (i * 2 + 1) * segmentLength;
+        float centerY = y1 + dy * (i * 2 + 1) * segmentLength;
+
+        for (int angle = -90; angle <= 90; angle += 5) {
+            float rad = angle * M_PI / 180.0f;
+            float x = centerX + px * radius * cos(rad);
+            float y = centerY + py * radius * sin(rad);
+            if (angle == -90) {
+                SDL_RenderDrawPoint(renderer, (int)x, (int)y);
+            } else {
+                SDL_RenderDrawLine(renderer, (int)x, (int)y, (int)x, (int)y);
+            }
+        }
+    }
+
+    renderText(name, (x1 + x2)/2 + px * radius*2, (y1 + y2)/2 + py * radius*2, BLACK);
+}
+
+void drawVoltageSource(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
+    const int radius = 12;
+    int centerX = (x1 + x2) / 2;
+    int centerY = (y1 + y2) / 2;
+
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    for (int angle = 0; angle < 360; angle += 5) {
+        float rad = angle * M_PI / 180.0f;
+        int x = centerX + radius * cos(rad);
+        int y = centerY + radius * sin(rad);
+        SDL_RenderDrawPoint(renderer, x, y);
+    }
+
+    SDL_RenderDrawLine(renderer, centerX-5, centerY, centerX+5, centerY);
+    SDL_RenderDrawLine(renderer, centerX, centerY-5, centerX, centerY+5);
+    SDL_RenderDrawLine(renderer, centerX-5, centerY+radius+5, centerX+5, centerY+radius+5);
+
+    renderText(name, centerX, centerY + radius + 15, BLACK);
+}
+
+void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
+    std::map<int, SDL_Point> nodePositions;
+    int yLevel = 100;
+    int xSpacing = 100;
+
+    calculateNodePositions(circuit);
+
+    for (const auto& node : circuit.getNodeMap()) {
+        int x = 100 + node.second * xSpacing;
+        nodePositions[node.second] = {x, yLevel};
+    }
+
+    for (const auto& comp : circuit.getComponents()) {
+        SDL_Point p1 = nodePositions[comp->node1];
+        SDL_Point p2 = nodePositions[comp->node2];
+
+        if (comp->node1 != 0 && comp->node2 != 0) {
+            SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+            SDL_RenderDrawLine(renderer, p1.x, p1.y, p2.x, p2.y);
+        }
+
+        switch(comp->type) {
+            case RESISTOR:
+                drawResistor(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
+                break;
+            case CAPACITOR:
+                drawCapacitor(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
+                break;
+            case INDUCTOR:
+                drawInductor(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
+                break;
+            case VOLTAGE_SOURCE:
+                drawVoltageSource(renderer, p1.x, p1.y, p2.x, p2.y, comp->name);
+                break;
+            case CURRENT_SOURCE:
+                // You could add drawCurrentSource here
+                break;
+            default:
+                renderText(comp->name, (p1.x + p2.x)/2, (p1.y + p2.y)/2, BLACK);
+        }
+    }
+
+    for (const auto& node : circuit.getNodeMap()) {
+        SDL_Point pos = nodePositions[node.second];
+        SDL_Rect nodeRect = {pos.x - 5, pos.y - 5, 10, 10};
+        SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
+        SDL_RenderFillRect(renderer, &nodeRect);
+        renderText(node.first, pos.x + 10, pos.y - 10, BLACK);
+    }
+}
+
+void plotSignals(SDL_Renderer* renderer, const std::vector<double>& voltages,
+                 const std::vector<double>& times, const SDL_Rect& area) {
+    if (voltages.empty() || times.empty()) return;
+
+    double minV = *std::min_element(voltages.begin(), voltages.end());
+    double maxV = *std::max_element(voltages.begin(), voltages.end());
+    double minT = *std::min_element(times.begin(), times.end());
+    double maxT = *std::max_element(times.begin(), times.end());
+
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawLine(renderer, area.x, area.y + area.h/2, area.x + area.w, area.y + area.h/2);
+    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h);
+
+    for (size_t i = 1; i < times.size(); i++) {
+        int x1 = area.x + static_cast<int>((times[i-1] - minT) / (maxT - minT) * area.w);
+        int y1 = area.y + area.h - static_cast<int>((voltages[i-1] - minV) / (maxV - minV) * area.h);
+        int x2 = area.x + static_cast<int>((times[i] - minT) / (maxT - minT) * area.w);
+        int y2 = area.y + area.h - static_cast<int>((voltages[i] - minV) / (maxV - minV) * area.h);
+
+        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    }
+}
+
+enum AppState {
+    MAIN_VIEW,
+    EDITOR_VIEW,
+    TOOLS,
+    FILES,
+    ADDING_COMPONENT,
+    COMPONENT_LIBRARY,
+    ANALYSIS_SETTINGS,
+    PLOT_VIEW
+};
+
+string selectedComponentType = "";
+AppState currentState = MAIN_VIEW;
+vector<Circuit*> undoStack;
+vector<Circuit*> redoStack;
+string copiedComponent;
+
+void saveUndoState(Circuit*& currentCircuit) {
+    // Clear redo stack when making new changes
+    for (auto circuit : redoStack) {
+        delete circuit;
+    }
+    redoStack.clear();
+
+    // Save current state to undo stack
+    Circuit* copy = new Circuit(*currentCircuit);
+    undoStack.push_back(copy);
+
+    // Limit undo stack size
+    if (undoStack.size() > 10) {
+        delete undoStack.front();
+        undoStack.erase(undoStack.begin());
+    }
+}
+
+void handleProbe(int x, int y, const Circuit& circuit) {
+    if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
+        y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
+
+        for (const auto& comp : circuit.listComponents()) {
+        }
+    }
+}
+
+void showAnalysisSettings(SDL_Renderer* renderer) {
+    SDL_Rect analysisWindow = {250, 150, 350, 300};
+
+    SDL_SetRenderDrawColor(renderer, 230, 230, 250, 255);
+    SDL_RenderFillRect(renderer, &analysisWindow);
+
+    renderText("Analysis Settings", analysisWindow.x + 20, analysisWindow.y + 20, BLACK);
+
+    renderText("Time Step (s):", analysisWindow.x + 20, analysisWindow.y + 60, BLACK);
+    TextBox stepBox = {analysisWindow.x + 150, analysisWindow.y + 60, 150, 30, std::to_string(tStep)};
+    renderTextBox(stepBox);
+
+    renderText("Stop Time (s):", analysisWindow.x + 20, analysisWindow.y + 110, BLACK);
+    TextBox stopBox = {analysisWindow.x + 150, analysisWindow.y + 110, 150, 30, std::to_string(tStop)};
+    renderTextBox(stopBox);
+
+    Button runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40, "Run", GREEN};
+    Button cancelBtn = {analysisWindow.x + 200, analysisWindow.y + 220, 100, 40, "Cancel", RED};
+    renderButton(runBtn);
+    renderButton(cancelBtn);
+}
+
+void showFileDialog(SDL_Renderer* renderer, const vector<string>& files) {
+    SDL_Rect dialog = {200, 150, 400, 400};
+
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+    SDL_RenderFillRect(renderer, &dialog);
+
+    renderText("Open Circuit File", dialog.x + 20, dialog.y + 20, BLACK);
+
+    SDL_Rect fileList = {dialog.x + 20, dialog.y + 60, 360, 250};
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &fileList);
+
+    for (size_t i = 0; i < files.size(); i++) {
+        SDL_Rect fileRect = {fileList.x + 10, fileList.y + 10 + (int)i*30, fileList.w - 20, 25};
+        SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+        SDL_RenderFillRect(renderer, &fileRect);
+        renderText(files[i], fileRect.x + 5, fileRect.y + 5, BLACK);
+    }
+
+    Button openBtn = {dialog.x + 100, dialog.y + 330, 100, 40, "Open", GREEN};
+    Button cancelBtn = {dialog.x + 220, dialog.y + 330, 100, 40, "Cancel", RED};
+    renderButton(openBtn);
+    renderButton(cancelBtn);
+}
+
+void showFileMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+    SDL_RenderFillRect(renderer, &menuRect);
+
+    Button newBtn = {menuRect.x + 10, menuRect.y + 40, 120, 30, "New Circuit", GRAY};
+    Button openBtn = {menuRect.x + 10, menuRect.y + 80, 120, 30, "Open", GRAY};
+    Button saveBtn = {menuRect.x + 10, menuRect.y + 120, 120, 30, "Save", GRAY};
+    Button saveAsBtn = {menuRect.x + 10, menuRect.y + 160, 120, 30, "Save As", GRAY};
+    Button exitBtn = {menuRect.x + 10, menuRect.y + 200, 120, 30, "Exit", RED};
+
+    renderButton(newBtn);
+    renderButton(openBtn);
+    renderButton(saveBtn);
+    renderButton(saveAsBtn);
+    renderButton(exitBtn);
+}
+
+void showEditMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+    SDL_RenderFillRect(renderer, &menuRect);
+
+    Button undoBtn = {menuRect.x + 10, menuRect.y + 40, 120, 30, "Undo", GRAY};
+    Button redoBtn = {menuRect.x + 10, menuRect.y + 80, 120, 30, "Redo", GRAY};
+    Button copyBtn = {menuRect.x + 10, menuRect.y + 120, 120, 30, "Copy", GRAY};
+    Button pasteBtn = {menuRect.x + 10, menuRect.y + 160, 120, 30, "Paste", GRAY};
+    Button deleteBtn = {menuRect.x + 10, menuRect.y + 200, 120, 30, "Delete", RED};
+
+    renderButton(undoBtn);
+    renderButton(redoBtn);
+    renderButton(copyBtn);
+    renderButton(pasteBtn);
+    renderButton(deleteBtn);
+}
+
+void showComponentProperties(SDL_Renderer* renderer, Component* component) {
+    if (!component) return;
+
+    SDL_Rect propWindow = {600, 100, 350, 400};
+
+    SDL_SetRenderDrawColor(renderer, 230, 250, 230, 255);
+    SDL_RenderFillRect(renderer, &propWindow);
+
+    renderText("Component Properties", propWindow.x + 20, propWindow.y + 20, BLACK);
+
+    //renderText("Type: " + component->getTypeString(), propWindow.x + 20, propWindow.y + 60, BLACK);
+    renderText("Name: " + component->name, propWindow.x + 20, propWindow.y + 90, BLACK);
+
+    renderText("Connections:", propWindow.x + 20, propWindow.y + 120, BLACK);
+    renderText("Node 1: " + getNodeName(component->node1), propWindow.x + 40, propWindow.y + 150, BLACK);
+    renderText("Node 2: " + getNodeName(component->node2), propWindow.x + 40, propWindow.y + 180, BLACK);
+
+    if (component->type != GROUND && component->type != DIODE) {
+        renderText("Value:", propWindow.x + 20, propWindow.y + 210, BLACK);
+        TextBox valueBox = {propWindow.x + 100, propWindow.y + 210, 150, 30, std::to_string(component->value)};
+        renderTextBox(valueBox);
+    }
+
+    if (component->type == SIN_VOLTAGE_SOURCE || component->type == SIN_CURRENT_SOURCE) {
+        //SinSource* src = dynamic_cast<SinSource*>(component);
+        renderText("Amplitude:", propWindow.x + 20, propWindow.y + 250, BLACK);
+        //TextBox ampBox = {propWindow.x + 120, propWindow.y + 250, 150, 30, std::to_string(src->amplitude)};
+        //renderTextBox(ampBox);
+    }
+
+    Button saveBtn = {propWindow.x + 50, propWindow.y + 320, 100, 40, "Save", GREEN};
+    Button deleteBtn = {propWindow.x + 200, propWindow.y + 320, 100, 40, "Delete", RED};
+    renderButton(saveBtn);
+    renderButton(deleteBtn);
+}
+
+void showOpenFileDialog(SDL_Renderer* renderer, vector<string>& files) {
+    SDL_Rect dialog = {200, 150, 400, 400};
+
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+    SDL_RenderFillRect(renderer, &dialog);
+
+    renderText("Open Circuit File", dialog.x + 20, dialog.y + 20, BLACK);
+
+    SDL_Rect fileList = {dialog.x + 20, dialog.y + 60, 360, 250};
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &fileList);
+
+    for (size_t i = 0; i < files.size(); i++) {
+        SDL_Rect fileRect = {fileList.x + 10, fileList.y + 10 + (int)i*30, fileList.w - 20, 25};
+        SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+        SDL_RenderFillRect(renderer, &fileRect);
+        renderText(files[i], fileRect.x + 5, fileRect.y + 5, BLACK);
+    }
+
+    Button openBtn = {dialog.x + 100, dialog.y + 330, 100, 40, "Open", GREEN};
+    Button cancelBtn = {dialog.x + 220, dialog.y + 330, 100, 40, "Cancel", RED};
+    renderButton(openBtn);
+    renderButton(cancelBtn);
+}
+
+void showSaveAsDialog(SDL_Renderer* renderer, string& currentFilename) {
+    SDL_Rect dialog = {250, 200, 300, 200};
+
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+    SDL_RenderFillRect(renderer, &dialog);
+
+    renderText("Save Circuit As", dialog.x + 20, dialog.y + 20, BLACK);
+
+    renderText("Filename:", dialog.x + 20, dialog.y + 60, BLACK);
+    TextBox nameBox = {dialog.x + 100, dialog.y + 60, 180, 30, currentFilename};
+    renderTextBox(nameBox);
+
+    Button saveBtn = {dialog.x + 50, dialog.y + 120, 100, 40, "Save", GREEN};
+    Button cancelBtn = {dialog.x + 170, dialog.y + 120, 100, 40, "Cancel", RED};
+    renderButton(saveBtn);
+    renderButton(cancelBtn);
+}
+
+void showResultsWindow(SDL_Renderer* renderer, const vector<double>& voltages,
+                       const vector<double>& times, const Circuit& circuit) {
+    SDL_Rect resultsWindow = {150, 100, 600, 500};
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &resultsWindow);
+
+    renderText("Simulation Results", resultsWindow.x + 20, resultsWindow.y + 20, BLACK);
+
+    SDL_Rect plotArea = {resultsWindow.x + 50, resultsWindow.y + 60, 500, 300};
+    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+    SDL_RenderFillRect(renderer, &plotArea);
+
+    plotSignals(renderer, voltages, times, plotArea);
+
+    SDL_Rect tableArea = {resultsWindow.x + 50, resultsWindow.y + 380, 500, 100};
+    SDL_SetRenderDrawColor(renderer, 230, 230, 230, 255);
+    SDL_RenderFillRect(renderer, &tableArea);
+
+    Button closeBtn = {resultsWindow.x + resultsWindow.w - 50, resultsWindow.y + 10, 40, 40, "X", RED};
+    renderButton(closeBtn);
+}
+
+void drawToolbar(SDL_Renderer* renderer) {
+    SDL_Rect toolbar = {0, 0, SCREEN_WIDTH, 40};
+    SDL_SetRenderDrawColor(renderer, 180, 180, 180, 255);
+    SDL_RenderFillRect(renderer, &toolbar);
+
+    Button fileBtn = {10, 5, 80, 30, "File", GRAY, false};
+    Button editBtn = {100, 5, 80, 30, "Edit", GRAY, false};
+    Button viewBtn = {190, 5, 80, 30, "View", GRAY, false};
+    Button analyzeBtn = {280, 5, 80, 30, "Analyze", GRAY, false};
+    Button toolsBtn = {370, 5, 80, 30, "Tools", GRAY, false};
+
+    renderButton(fileBtn);
+    renderButton(editBtn);
+    renderButton(viewBtn);
+    renderButton(analyzeBtn);
+    renderButton(toolsBtn);
+}
+
+bool isPointNearLine(int px, int py, int x1, int y1, int x2, int y2, int threshold) {
+    float lineLength = sqrtf((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1));
+    if (lineLength == 0) return false;
+
+    float u = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / (lineLength * lineLength);
+    u = fmaxf(0, fminf(1, u));
+
+    float closestX = x1 + u * (x2 - x1);
+    float closestY = y1 + u * (y2 - y1);
+
+    float distance = sqrtf((px - closestX) * (px - closestX) + (py - closestY) * (py - closestY));
+    return distance <= threshold;
+}
+
+bool isMouseOver(const SDL_Rect& rect, int x, int y) {
+    return (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h);
+}
+
+void handleComponentSelection(Circuit* circuit, int x, int y) {
+    if (!circuit) return;
+
+    calculateNodePositions(*circuit);
+
+    if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
+        y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
+
+        for (const auto& comp : circuit->getComponents()) {
+            SDL_Point p1 = nodePositions[comp->node1];
+            SDL_Point p2 = nodePositions[comp->node2];
+
+            if (isPointNearLine(x, y, p1.x, p1.y, p2.x, p2.y, 10)) {
+                cout << "Selected component: " << comp->getInfo() << endl;
+                return;
+            }
+        }
+
+        for (const auto& node : circuit->getNodeMap()) {
+            SDL_Point pos = nodePositions[node.second];
+            if (abs(x - pos.x) < 10 && abs(y - pos.y) < 10) {
+                cout << "Selected node: " << node.first << " (Node " << node.second << ")" << endl;
+                return;
+            }
+        }
+    }
+}
+
+void handleComponentPlacement(Circuit* circuit, int x, int y) {
+    if (!selectedComponentType.empty() &&
+    x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
+    y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
+        static int compCount = 1;
+        string name = selectedComponentType.substr(0,1) + to_string(compCount++);
+
+        // Find nearest node or create new one if far from existing nodes
+        int node1 = -1, node2 = -1;
+        int minDist = 20; // pixels
+        for (const auto& node : nodePositions) {
+            int dist = sqrt(pow(x - node.second.x, 2) + pow(y - node.second.y, 2));
+            if (dist < minDist) {
+                if (node1 == -1) node1 = node.first;
+                else node2 = node.first;
+                minDist = dist;
+            }
+        }
+
+        // If no nearby nodes, create new ones
+        if (node1 == -1) {
+            node1 = nextNodeNumber++;
+            nodePositions[node1] = {x, y};
+        }
+        if (node2 == -1 && selectedComponentType != "Ground") {
+            node2 = nextNodeNumber++;
+            nodePositions[node2] = {x + 50, y}; // Place second node offset
+        }
+
+        Component* newComp = nullptr;
+        double defaultValue = 1000.0;
+
+        if (selectedComponentType == "Resistor") {
+            newComp = new Resistor(name, node1, node2, defaultValue);
+        }
+        else if (selectedComponentType == "Capacitor") {
+            newComp = new Capacitor(name, node1, node2, 1e-6); // Default 1uF
+        }
+        else if (selectedComponentType == "Inductor") {
+            newComp = new Inductor(name, node1, node2, 1e-3); // Default 1mH
+        }
+        else if (selectedComponentType == "VoltageSource") {
+            newComp = new VoltageSource(name, node1, node2, 5.0); // Default 5V
+        }
+        else if (selectedComponentType == "CurrentSource") {
+            newComp = new CurrentSource(name, node1, node2, 0.1); // Default 100mA
+        }
+        else if (selectedComponentType == "Diode") {
+            newComp = new Diode(name, node1, node2);
+        }
+        else if (selectedComponentType == "Ground") {
+            newComp = new Ground(name, node1);
+        }
+
+        if (newComp) {
+            saveUndoState(circuit);
+            circuit->addComponent(newComp);
+            selectedComponentType = ""; // Reset selection
+        }
+    }
+}
+
+void addComponentAtPosition(Circuit& circuit, int x, int y) {
+    static int compCount = 1;
+
+    std::string name = selectedComponentType.substr(0,1) + std::to_string(compCount++);
+    int node1 = 0;
+    int node2 = 1;
+
+    Component* newComp = nullptr;
+
+    if (selectedComponentType == "Resistor") {
+        newComp = new Resistor(name, node1, node2, 1000.0);
+    }
+    else if (selectedComponentType == "Capacitor") {
+        newComp = new Capacitor(name, node1, node2, 1e-6);
+    }
+
+    if (newComp) {
+        newComp->setPosition(x, y);
+        circuit.addComponent(newComp);
+    }
+}
+
+void handleSaveButton(Circuit* circuit, const string& currentCircuitFile) {
+    if (!circuit) return;
+
+    if (currentCircuitFile.empty()) {
+        cout << "No current circuit file specified!" << endl;
+        return;
+    }
+
+    if (saveCircuitToFile(*circuit, currentCircuitFile)) {
+        cout << "Circuit saved to " << currentCircuitFile << endl;
+    } else {
+        cout << "Failed to save circuit!" << endl;
+    }
+}
+
+void handleLoadButton(Circuit*& circuit, string& currentCircuitFile) {
+    if (currentCircuitFile.empty()) {
+        cout << "No circuit file to load!" << endl;
+        return;
+    }
+
+    resetGlobalState();
+    delete circuit;
+    circuit = new Circuit();
+
+    processCircuitFile(currentCircuitFile, *circuit);
+    cout << "Reloaded circuit from " << currentCircuitFile << endl;
+}
+
+void handleToolbarButton(int x, int y) {
+    if (x >= 10 && x <= 90 && y >= 5 && y <= 35) {
+        currentState = (currentState == MAIN_VIEW) ? FILES : MAIN_VIEW;
+    }
+    else if (x >= 100 && x <= 180 && y >= 5 && y <= 35) {
+        currentState = (currentState == MAIN_VIEW) ? EDITOR_VIEW : MAIN_VIEW;
+
+    }
+    else if (x >= 190 && x <= 270 && y >= 5 && y <= 35) {
+        showVoltage = !showVoltage;
+        showCurrent = !showCurrent;
+    }
+    else if (x >= 280 && x <= 360 && y >= 5 && y <= 35) {
+        currentState = (currentState == MAIN_VIEW) ? ANALYSIS_SETTINGS : MAIN_VIEW;
+    }
+    else if (x >= 370 && x <= 450 && y >= 5 && y <= 35) {
+        currentState = (currentState == MAIN_VIEW) ? TOOLS : MAIN_VIEW;
+    }
+}
+
+void handleComponentLibraryClick(int x, int y) {
+    if (isMouseOver(passiveBtn.rect, x, y)) {
+        showPassives = !showPassives;
+        showSources = false;
+        showSemis = false;
+        showDependents = false;
+    }
+    else if (isMouseOver(sourcesBtn.rect, x, y)) {
+        showPassives = false;
+        showSources = !showSources;
+        showSemis = false;
+        showDependents = false;
+    }
+    else if (isMouseOver(semiBtn.rect, x, y)) {
+        showPassives = false;
+        showSources = false;
+        showSemis = !showSemis;
+        showDependents = false;
+    }
+    else if (isMouseOver(depBtn.rect, x, y)) {
+        showPassives = false;
+        showSources = false;
+        showSemis = false;
+        showDependents = !showDependents;
+    }
+    else if (showPassives) {
+        if (isMouseOver(resBtn.rect, x, y)) {
+            selectedComponentType = "Resistor";
+        }
+        else if (isMouseOver(capBtn.rect, x, y)) {
+            selectedComponentType = "Capacitor";
+        }
+        else if (isMouseOver(indBtn.rect, x, y)) {
+            selectedComponentType = "Inductor";
+        }
+    }
+    else if (showSources) {
+        if (isMouseOver(vSrcBtn.rect, x, y)) {
+            selectedComponentType = "VoltageSource";
+        }
+        else if (isMouseOver(iSrcBtn.rect, x, y)) {
+            selectedComponentType = "CurrentSource";
+        }
+        else if (isMouseOver(gndBtn.rect, x, y)) {
+            selectedComponentType = "Ground";
+        }
+    }
+    else if (showSemis && isMouseOver(diodeBtn.rect, x, y)) {
+        selectedComponentType = "Diode";
+    }
+    else if (showDependents) {
+        if (isMouseOver(vcvsBtn.rect, x, y)) {
+            selectedComponentType = "VCVS";
+        }
+        else if (isMouseOver(vccsBtn.rect, x, y)) {
+            selectedComponentType = "VCCS";
+        }
+        else if (isMouseOver(ccvsBtn.rect, x, y)) {
+            selectedComponentType = "CCVS";
+        }
+        else if (isMouseOver(cccsBtn.rect, x, y)) {
+            selectedComponentType = "CCCS";
+        }
+    }
+}
+
+void renderMainView(SDL_Renderer* renderer, Circuit& circuit) {
+    drawCircuit(circuit, renderer);
+
+    if (selectedComponent) {
+        showComponentProperties(renderer, selectedComponent);
+    }
+}
+
+void renderComponentLibrary(SDL_Renderer* renderer) {
+    SDL_Rect libWindow = {850, 50, 380, 600};
+
+    // Draw library background
+    SDL_SetRenderDrawColor(renderer, 230, 230, 230, 255);
+    SDL_RenderFillRect(renderer, &libWindow);
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawRect(renderer, &libWindow);
+
+    renderText("Component Library", libWindow.x + 20, libWindow.y + 10, BLACK);
+
+    // Render category buttons
+    renderButton(passiveBtn);
+    renderButton(sourcesBtn);
+    renderButton(semiBtn);
+    renderButton(depBtn);
+
+    // Render components based on selected category
+    if (showPassives) {
+        renderButton(resBtn);
+        renderButton(capBtn);
+        renderButton(indBtn);
+
+        // Draw component previews
+        SDL_Rect resPreview = {900, 250, 60, 30};
+        SDL_SetRenderDrawColor(renderer, 200, 100, 100, 255);
+        SDL_RenderFillRect(renderer, &resPreview);
+        renderText("R", 920, 255, WHITE);
+
+        SDL_Rect capPreview = {900, 300, 60, 30};
+        SDL_SetRenderDrawColor(renderer, 100, 100, 200, 255);
+        SDL_RenderFillRect(renderer, &capPreview);
+        renderText("C", 920, 305, WHITE);
+
+        SDL_Rect indPreview = {900, 350, 60, 30};
+        SDL_SetRenderDrawColor(renderer, 100, 200, 100, 255);
+        SDL_RenderFillRect(renderer, &indPreview);
+        renderText("L", 920, 355, WHITE);
+    }
+
+    if (showSources) {
+        renderButton(vSrcBtn);
+        renderButton(iSrcBtn);
+        renderButton(gndBtn);
+
+        // Draw component previews
+        SDL_Rect vPreview = {1000, 250, 30, 30};
+        SDL_SetRenderDrawColor(renderer, 200, 200, 100, 255);
+        SDL_RenderFillRect(renderer, &vPreview);
+        renderText("V", 1010, 255, WHITE);
+
+        SDL_Rect iPreview = {1000, 300, 30, 30};
+        SDL_SetRenderDrawColor(renderer, 200, 100, 200, 255);
+        SDL_RenderFillRect(renderer, &iPreview);
+        renderText("I", 1010, 305, WHITE);
+
+        SDL_Rect gndPreview = {1000, 350, 30, 30};
+        SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
+        SDL_RenderFillRect(renderer, &gndPreview);
+        renderText("GND", 1010, 355, WHITE);
+    }
+
+    if (showSemis) {
+        renderButton(diodeBtn);
+
+        // Draw component preview
+        SDL_Rect diodePreview = {900, 250, 60, 30};
+        SDL_SetRenderDrawColor(renderer, 150, 150, 150, 255);
+        SDL_RenderFillRect(renderer, &diodePreview);
+        renderText("D", 920, 255, WHITE);
+    }
+
+    if (showDependents) {
+        renderButton(vcvsBtn);
+        renderButton(vccsBtn);
+        renderButton(ccvsBtn);
+        renderButton(cccsBtn);
+
+        // Draw component previews
+        SDL_Rect vcvsPreview = {1000, 250, 60, 30};
+        SDL_SetRenderDrawColor(renderer, 200, 150, 100, 255);
+        SDL_RenderFillRect(renderer, &vcvsPreview);
+        renderText("E", 1020, 255, WHITE);
+
+        SDL_Rect vccsPreview = {1000, 300, 60, 30};
+        SDL_SetRenderDrawColor(renderer, 100, 150, 200, 255);
+        SDL_RenderFillRect(renderer, &vccsPreview);
+        renderText("G", 1020, 305, WHITE);
+    }
+
+    // Close button
+    Button closeBtn = {libWindow.x + libWindow.w - 40, libWindow.y + 10, 30, 30, "X", RED};
+    renderButton(closeBtn);
+}
+
+void renderAnalysisSettings(SDL_Renderer* renderer) {
+    SDL_Rect analysisWindow = {250, 150, 350, 300};
+
+    SDL_SetRenderDrawColor(renderer, 230, 230, 250, 255);
+    SDL_RenderFillRect(renderer, &analysisWindow);
+
+    renderText("Analysis Settings", analysisWindow.x + 20, analysisWindow.y + 20, BLACK);
+
+    renderText("Time Step (s):", analysisWindow.x + 20, analysisWindow.y + 60, BLACK);
+    TextBox stepBox = {analysisWindow.x + 150, analysisWindow.y + 60, 150, 30, std::to_string(tStep)};
+    renderTextBox(stepBox);
+
+    renderText("Stop Time (s):", analysisWindow.x + 20, analysisWindow.y + 110, BLACK);
+    TextBox stopBox = {analysisWindow.x + 150, analysisWindow.y + 110, 150, 30, std::to_string(tStop)};
+    renderTextBox(stopBox);
+
+    Button runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40, "Run", GREEN};
+    Button cancelBtn = {analysisWindow.x + 200, analysisWindow.y + 220, 100, 40, "Cancel", RED};
+    renderButton(runBtn);
+    renderButton(cancelBtn);
+}
+
+void renderPlotView(SDL_Renderer* renderer) {
+    SDL_SetRenderDrawColor(renderer, 245, 245, 245, 255);
+    SDL_RenderClear(renderer);
+
+    SDL_Rect plotArea = {100, 100, SCREEN_WIDTH-200, SCREEN_HEIGHT-200};
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderFillRect(renderer, &plotArea);
+
+    if (!voltages.empty()) {
+        plotSignals(renderer, voltages, Vtimes, plotArea);
+    }
+
+    Button backBtn = {50, 50, 100, 40, "Back", GRAY};
+    renderButton(backBtn);
+}
+
+void showAddComponentDialog(SDL_Renderer* renderer, Circuit& circuit) {
+    SDL_Rect dialogRect = {300, 200, 400, 400};
+
+    SDL_SetRenderDrawColor(renderer, 220, 220, 220, 255);
+    SDL_RenderFillRect(renderer, &dialogRect);
+    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+    SDL_RenderDrawRect(renderer, &dialogRect);
+
+    renderText("Add Component", dialogRect.x + 20, dialogRect.y + 20, BLACK);
+
+    renderText("Component Type:", dialogRect.x + 20, dialogRect.y + 60, BLACK);
+
+    Button resistorBtn = {dialogRect.x + 150, dialogRect.y + 60, 100, 30, "Resistor", GRAY};
+    Button capacitorBtn = {dialogRect.x + 260, dialogRect.y + 60, 100, 30, "Capacitor", GRAY};
+    Button inductorBtn = {dialogRect.x + 150, dialogRect.y + 100, 100, 30, "Inductor", GRAY};
+    Button voltageSrcBtn = {dialogRect.x + 260, dialogRect.y + 100, 100, 30, "V Source", GRAY};
+    Button currentSrcBtn = {dialogRect.x + 150, dialogRect.y + 140, 100, 30, "I Source", GRAY};
+    Button diodeBtn = {dialogRect.x + 260, dialogRect.y + 140, 100, 30, "Diode", GRAY};
+    Button groundBtn = {dialogRect.x + 150, dialogRect.y + 180, 100, 30, "Ground", GRAY};
+
+    renderButton(resistorBtn);
+    renderButton(capacitorBtn);
+    renderButton(inductorBtn);
+    renderButton(voltageSrcBtn);
+    renderButton(currentSrcBtn);
+    renderButton(diodeBtn);
+    renderButton(groundBtn);
+
+    renderText("Name:", dialogRect.x + 20, dialogRect.y + 220, BLACK);
+    static TextBox nameBox = {dialogRect.x + 100, dialogRect.y + 220, 150, 30, "R1", false};
+
+    renderText("Node 1:", dialogRect.x + 20, dialogRect.y + 260, BLACK);
+    static TextBox node1Box = {dialogRect.x + 100, dialogRect.y + 260, 150, 30, "1", false};
+
+    renderText("Node 2:", dialogRect.x + 20, dialogRect.y + 300, BLACK);
+    static TextBox node2Box = {dialogRect.x + 100, dialogRect.y + 300, 150, 30, "2", false};
+
+    renderText("Value:", dialogRect.x + 20, dialogRect.y + 340, BLACK);
+    static TextBox valueBox = {dialogRect.x + 100, dialogRect.y + 340, 150, 30, "1000", false};
+
+    renderTextBox(nameBox);
+    renderTextBox(node1Box);
+    renderTextBox(node2Box);
+    renderTextBox(valueBox);
+
+    Button addBtn = {dialogRect.x + 100, dialogRect.y + 380, 100, 30, "Add", GREEN};
+    Button cancelBtn = {dialogRect.x + 220, dialogRect.y + 380, 100, 30, "Cancel", RED};
+    renderButton(addBtn);
+    renderButton(cancelBtn);
+}
+
+void drawComponent(SDL_Renderer* renderer, Component* comp) {
+    std::pair<int, int> pos = comp->getPosition();
+    int x = pos.first;
+    int y = pos.second;
+    std::string type = comp->getType();
+
+    SDL_Rect rect = { x - 20, y - 10, 40, 20 };
+
+    if (type == "Resistor") {
+        SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+        SDL_RenderFillRect(renderer, &rect);
+    }
+    else if (type == "Capacitor") {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+        SDL_RenderFillRect(renderer, &rect);
+    }
+}
+
+void renderCircuit(SDL_Renderer* renderer, Circuit& circuit, TTF_Font* font) {
+    for (auto comp : circuit.getComponents()) {
+        drawComponent(renderer, comp);
+
+        std::pair<int, int> pos = comp->getPosition();
+        int x = pos.first;
+        int y = pos.second;
+
+
+    }
+}
+
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
 
-    Circuit* circuit = nullptr;
-    string command;
     string currentCircuitFile = "";
-    bool inCircuitMode = false;
+    Circuit* circuit = new Circuit();
 
-    showSaveMenu();
+    if (!initSDL()) {
+        return 1;
+    }
 
-    while (true) {
-        if (inCircuitMode) {
-            cout << "[" << currentCircuitFile << "] >>> ";
-        } else {
-            cout << "Saves> ";
+    bool running = true;
+    SDL_Event event;
+    string inputText = "";
+    bool textInputActive = false;
+    TextBox* activeTextBox = nullptr;
+    vector<string> txtFiles = listTxtFiles(".");
+    bool FileDialog = false;
+    bool SaveAsDialog = false;
+    string newFilename = "";
+
+    while (running) {
+
+        if (undoStack.empty()) {
+            saveUndoState(circuit);
         }
 
-        if (!getline(cin, command)) {
-            break;
-        }
-        if (command.empty()) continue;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) {
+                running = false;
+            }
+            else if (event.type == SDL_MOUSEBUTTONDOWN) {
+                int x, y;
+                SDL_GetMouseState(&x, &y);
 
-        istringstream iss(command);
-        string cmd;
-        iss >> cmd;
-        transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
-
-        // --- STATE 1: SAVE/LOAD MENU ---
-        if (!inCircuitMode) {
-            if (cmd == "list") {
-                cout << "Available circuit files (.txt) in current directory:\n";
-                vector<string> files = listTxtFiles(".");
-                if (files.empty()) {
-                    cout << "  No .txt files found.\n";
-                } else {
-                    for (size_t i = 0; i < files.size(); i++) {
-                        cout << "  [" << i + 1 << "] " << files[i] << endl;
+                // Handle toolbar buttons
+                if (y <= 40) {
+                    if (x >= 10 && x <= 90) { // File button
+                        FileMenu = !FileMenu;
+                        EditMenu = false;
+                        ComponentLibrary = false;
+                        AnalysisSettings = false;
+                    }
+                    else if (x >= 100 && x <= 180) { // Components button
+                        EditMenu = !EditMenu;
+                        ComponentLibrary = false;
+                        FileMenu = false;
+                        AnalysisSettings = false;
+                    }
+                    else if (x >= 280 && x <= 360) { // Analyze button
+                        AnalysisSettings = !AnalysisSettings;
+                        FileMenu = false;
+                        EditMenu = false;
+                        ComponentLibrary = false;
+                    }
+                    else if (x >= 370 && x <= 450) {
+                        ComponentLibrary = !ComponentLibrary;
+                        FileMenu = false;
+                        EditMenu = false;
+                        AnalysisSettings = false;
                     }
                 }
-            } else if (cmd == "load") {
-                string filename;
-                if (iss >> filename) {
-                    resetGlobalState();
-                    circuit = new Circuit();
 
-                    if (all_of(filename.begin(), filename.end(), ::isdigit)) {
-                        vector<string> files = listTxtFiles(".");
-                        try {
-                            int index = stoi(filename) - 1;
-                            if (index >= 0 && index < files.size()) {
-                                filename = files[index];
-                            } else {
-                                throw out_of_range("Invalid index");
-                            }
-                        } catch (const exception&) {
-                            cout << "ERROR: Invalid file number.\n";
+                // Handle component selection in circuit area
+                if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
+                    y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
+                    selectedComponent = nullptr;
+                    for (auto comp : circuit->getComponents()) {
+                        auto pos1 = nodePositions[comp->node1];
+                        auto pos2 = nodePositions[comp->node2];
+                        if (isPointNearLine(x, y, pos1.x, pos1.y, pos2.x, pos2.y, 10)) {
+                            selectedComponent = comp;
+                            break;
+                        }
+                    }
+                }
+
+                if (ComponentLibrary) {
+                    handleComponentLibraryClick(x, y);
+
+                    // Check for close button
+                    SDL_Rect libWindow = {850, 50, 380, 600};
+                    Button closeBtn = {libWindow.x + libWindow.w - 40, libWindow.y + 10, 30, 30, "X", RED};
+                    if (isMouseOver(closeBtn.rect, x, y)) {
+                        ComponentLibrary = false;
+                    }
+                }
+
+                // Handle file menu
+                if (FileMenu) {
+                    if (x >= fileMenuRect.x + 10 && x <= fileMenuRect.x + 130) {
+                        if (y >= fileMenuRect.y + 40 && y <= fileMenuRect.y + 70) { // New
+                            resetGlobalState();
                             delete circuit;
-                            circuit = nullptr;
-                            continue;
+                            circuit = new Circuit();
+                            currentCircuitFile = "";
+                            FileMenu = false;
+                        }
+                        else if (y >= fileMenuRect.y + 80 && y <= fileMenuRect.y + 110) { // Open
+                            FileDialog = true;
+                            txtFiles = listTxtFiles(".");
+                        }
+                        else if (y >= fileMenuRect.y + 120 && y <= fileMenuRect.y + 150) { // Save
+                            if (!currentCircuitFile.empty()) {
+                                saveCircuitToFile(*circuit, currentCircuitFile);
+                            }
+                            else {
+                                SaveAsDialog = true;
+                            }
+                            FileMenu = false;
+                        }
+                        else if (y >= fileMenuRect.y + 160 && y <= fileMenuRect.y + 190) { // Save As
+                            SaveAsDialog = true;
+                            FileMenu = false;
+                        }
+                        else if (y >= fileMenuRect.y + 200 && y <= fileMenuRect.y + 230) { // Exit
+                            running = false;
                         }
                     }
-
-                    if (filename.find(".txt") == string::npos) {
-                        filename += ".txt";
-                    }
-
-                    processCircuitFile(filename, *circuit);
-                    currentCircuitFile = filename;
-                    inCircuitMode = true;
-                    cout << "SUCCESS: Loaded '" << currentCircuitFile << "'. Entering circuit mode.\n";
-                    showCircuitHelp();
-
-                } else {
-                    cout << "ERROR: Missing filename. Usage: load <name|num>\n";
                 }
-            } else if (cmd == "create") {
-                string filename;
-                if (iss >> filename) {
-                    resetGlobalState();
-                    delete circuit;
-                    circuit = new Circuit();
 
-                    if (filename.find(".txt") == string::npos) {
-                        filename += ".txt";
+                if (EditMenu) {
+                    if (x >= editMenuRect.x + 10 && x <= editMenuRect.x + 130) {
+                        if (y >= editMenuRect.y + 40 && y <= editMenuRect.y + 70) { // Undo
+                            if (!undoStack.empty()) {
+                                saveUndoState(circuit); // Current state becomes redo
+                                delete circuit;
+                                circuit = new Circuit(*undoStack.back());
+                                undoStack.pop_back();
+                            }
+                            EditMenu = false;
+                        }
+                        else if (y >= editMenuRect.y + 80 && y <= editMenuRect.y + 110) { // Redo
+                            if (!redoStack.empty()) {
+                                saveUndoState(circuit); // Current state becomes undo
+                                delete circuit;
+                                circuit = new Circuit(*redoStack.back());
+                                redoStack.pop_back();
+                            }
+                            EditMenu = false;
+                        }
+                        else if (y >= editMenuRect.y + 120 && y <= editMenuRect.y + 150) { // Copy
+                            if (selectedComponent) {
+                                copiedComponent = selectedComponent->getInfo();
+                            }
+                            EditMenu = false;
+                        }
+                        else if (y >= editMenuRect.y + 160 && y <= editMenuRect.y + 190) { // Paste
+                            if (!copiedComponent.empty()) {
+                                istringstream iss(copiedComponent);
+                                string type, name, node1, node2, valueStr;
+                                iss >> type >> name >> node1 >> node2 >> valueStr;
+
+                                // Generate unique name
+                                static int pasteCount = 1;
+                                name = name + "_copy" + to_string(pasteCount++);
+
+                                // Create new component
+                                Component* newComp = nullptr;
+                                if (type == "Resistor") {
+                                    newComp = new Resistor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "Capacitor") {
+                                    newComp = new Capacitor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "Inductor") {
+                                    newComp = new Inductor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "VoltageSource") {
+                                    newComp = new VoltageSource(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "CurrentSource") {
+                                    newComp = new CurrentSource(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "Diode") {
+                                    newComp = new Diode(name, getOrCreateNode(node1), getOrCreateNode(node2));
+                                }
+                                else if (selectedComponentType == "Ground") {
+                                    newComp = new Ground(name, getOrCreateNode(node1));
+                                }
+
+                                if (newComp) {
+                                    saveUndoState(circuit);
+                                    circuit->addComponent(newComp);
+                                }
+                            }
+                            EditMenu = false;
+                        }
+
+                        else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) { // Delete
+                            if (selectedComponent) {
+                                saveUndoState(circuit);
+                                circuit->deleteComponent(selectedComponent->name);
+                                selectedComponent = nullptr;
+                            }
+                            EditMenu = false;
+                        }
                     }
-
-                    ofstream testFile(filename);
-                    if (!testFile.is_open()) {
-                        cout << "ERROR: Cannot create file '" << filename << "'. Check permissions.\n";
-                        delete circuit;
-                        circuit = nullptr;
-                        continue;
-                    }
-                    testFile.close();
-
-                    currentCircuitFile = filename;
-                    inCircuitMode = true;
-                    cout << "SUCCESS: Created new circuit '" << currentCircuitFile << "'. Entering circuit mode.\n";
-                    showCircuitHelp();
-                } else {
-                    cout << "ERROR: Missing filename. Usage: create <name>\n";
                 }
-            } else if (cmd == "exit") {
-                break;
-            } else {
-                cout << "ERROR: Invalid command in Save Menu. Use 'list', 'load', 'create', or 'exit'.\n";
+
+                // Handle component library
+                if (ComponentLibrary) {
+                    // Passive components
+                    if (x >= 870 && x <= 990) {
+                        if (y >= 50 && y <= 90) { // Resistor
+                            selectedComponentType = "Resistor";
+                        }
+                        else if (y >= 100 && y <= 140) { // Capacitor
+                            selectedComponentType = "Capacitor";
+                        }
+                        else if (y >= 150 && y <= 190) { // Inductor
+                            selectedComponentType = "Inductor";
+                        }
+                        else if (y >= 200 && y <= 240) { // Diode
+                            selectedComponentType = "Diode";
+                        }
+                    }
+                    // Sources
+                    else if (x >= 1000 && x <= 1120) {
+                        if (y >= 50 && y <= 90) { // Voltage Source
+                            selectedComponentType = "VoltageSource";
+                        }
+                        else if (y >= 100 && y <= 140) { // Current Source
+                            selectedComponentType = "CurrentSource";
+                        }
+                        else if (y >= 150 && y <= 190) { // Ground
+                            selectedComponentType = "Ground";
+                        }
+                    }
+                }
+
+                // Handle analysis settings
+                if (AnalysisSettings) {
+                    SDL_Rect analysisWindow = {250, 150, 350, 300};
+                    if (x >= analysisWindow.x + 50 && x <= analysisWindow.x + 150 &&
+                        y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) { // Run
+                        try {
+                            circuit->analyzeTransient(tStep, tStop);
+                            showVoltage = true;
+                            showCurrent = false;
+                            AnalysisSettings = false;
+                        }
+                        catch (const exception& e) {
+                            cerr << "Analysis error: " << e.what() << endl;
+                        }
+                    }
+                    else if (x >= analysisWindow.x + 200 && x <= analysisWindow.x + 300 &&
+                        y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) { // Cancel
+                        AnalysisSettings = false;
+                    }
+                }
+
+                if (!selectedComponentType.empty() && event.type == SDL_MOUSEBUTTONDOWN) {
+                    int x, y;
+                    SDL_GetMouseState(&x, &y);
+                    handleComponentPlacement(circuit, x, y);
+                }
+
+                // Handle file dialog
+                if (FileDialog) {
+                    SDL_Rect dialog = {200, 150, 400, 400};
+                    if (x >= dialog.x + 100 && x <= dialog.x + 200 &&
+                        y >= dialog.y + 330 && y <= dialog.y + 370) { // Open
+                        // Find which file was clicked
+                        for (size_t i = 0; i < txtFiles.size(); i++) {
+                            SDL_Rect fileRect = {dialog.x + 20, dialog.y + 60 + (int)i * 30, 360, 25};
+                            if (x >= fileRect.x && x <= fileRect.x + fileRect.w &&
+                                y >= fileRect.y && y <= fileRect.y + fileRect.h) {
+                                resetGlobalState();
+                                delete circuit;
+                                circuit = new Circuit();
+                                processCircuitFile(txtFiles[i], *circuit);
+                                currentCircuitFile = txtFiles[i];
+                                FileDialog = false;
+                                break;
+                            }
+                        }
+                    }
+                    else if (x >= dialog.x + 220 && x <= dialog.x + 320 &&
+                        y >= dialog.y + 330 && y <= dialog.y + 370) { // Cancel
+                        FileDialog = false;
+                    }
+                }
+
+                // Handle save as dialog
+                if (SaveAsDialog) {
+                    SDL_Rect dialog = {250, 200, 300, 200};
+                    if (x >= dialog.x + 50 && x <= dialog.x + 150 &&
+                        y >= dialog.y + 120 && y <= dialog.y + 160) { // Save
+                        if (!newFilename.empty()) {
+                            if (newFilename.find(".txt") == string::npos) {
+                                newFilename += ".txt";
+                            }
+                            if (saveCircuitToFile(*circuit, newFilename)) {
+                                currentCircuitFile = newFilename;
+                            }
+                            SaveAsDialog = false;
+                            newFilename = "";
+                        }
+                    }
+                    else if (x >= dialog.x + 170 && x <= dialog.x + 270 &&
+                        y >= dialog.y + 120 && y <= dialog.y + 160) { // Cancel
+                        SaveAsDialog = false;
+                        newFilename = "";
+                    }
+                    else if (x >= dialog.x + 100 && x <= dialog.x + 280 &&
+                        y >= dialog.y + 60 && y <= dialog.y + 90) { // Text box
+                        textInputActive = true;
+                        activeTextBox = nullptr; // We'll handle this specially
+                        inputText = newFilename;
+                    }
+                }
+
+                // Handle text box input
+                if (x >= node1Box.rect.x && x <= node1Box.rect.x + node1Box.rect.w &&
+                    y >= node1Box.rect.y && y <= node1Box.rect.y + node1Box.rect.h) {
+                    textInputActive = true;
+                    activeTextBox = &node1Box;
+                    inputText = node1Box.text;
+                }
+                else if (x >= node2Box.rect.x && x <= node2Box.rect.x + node2Box.rect.w &&
+                    y >= node2Box.rect.y && y <= node2Box.rect.y + node2Box.rect.h) {
+                    textInputActive = true;
+                    activeTextBox = &node2Box;
+                    inputText = node2Box.text;
+                }
+                else if (x >= valueBox.rect.x && x <= valueBox.rect.x + valueBox.rect.w &&
+                    y >= valueBox.rect.y && y <= valueBox.rect.y + valueBox.rect.h) {
+                    textInputActive = true;
+                    activeTextBox = &valueBox;
+                    inputText = valueBox.text;
+                }
+                else {
+                    textInputActive = false;
+                    activeTextBox = nullptr;
+                }
+            }
+            else if (event.type == SDL_KEYDOWN && textInputActive) {
+                if (event.key.keysym.sym == SDLK_RETURN) {
+                    textInputActive = false;
+                    if (activeTextBox) {
+                        activeTextBox->text = inputText;
+                    }
+                    else if (SaveAsDialog) {
+                        newFilename = inputText;
+                    }
+                    inputText = "";
+                }
+                else if (event.key.keysym.sym == SDLK_BACKSPACE && !inputText.empty()) {
+                    inputText.pop_back();
+                }
+                else if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    textInputActive = false;
+                    inputText = "";
+                }
+            }
+            else if (event.type == SDL_TEXTINPUT && textInputActive) {
+                inputText += event.text.text;
             }
         }
-        // --- STATE 2: CIRCUIT EDIT/ANALYSIS MENU ---
-        else {
-            if (cmd == "return") {
-                inCircuitMode = false;
-                currentCircuitFile = "";
-                delete circuit;
-                circuit = nullptr;
-                resetGlobalState();
-                cout << "Returning to Save & Load Menu.\n";
-                showSaveMenu();
-                continue;
-            } else if (cmd == "exit") {
-                break;
-            } else if (cmd == "help") {
-                showCircuitHelp();
-                continue;
-            } else if (cmd == "save") {
-                string filename;
-                iss >> filename;
-                if (filename.empty()) {
-                    filename = currentCircuitFile;
-                }
-                if (filename.find(".txt") == string::npos) {
-                    filename += ".txt";
-                }
-                if (saveCircuitToFile(*circuit, filename)) {
-                    cout << "SUCCESS: Circuit saved to " << filename << endl;
-                    currentCircuitFile = filename;
-                } else {
-                    cout << "ERROR: Could not save to file " << filename << endl;
-                }
-            } else if (cmd == "analyze") {
-                string analysisType;
-                iss >> analysisType;
-                transform(analysisType.begin(), analysisType.end(), analysisType.begin(), ::tolower);
 
-                try {
-                    if (!circuit->hasGround()) {
-                        throw runtime_error("No ground node detected in the circuit");
-                    }
-
-                    if (analysisType.empty() || analysisType == "dc") {
-                        string sweep_keyword;
-                        if(iss >> sweep_keyword) {
-                            transform(sweep_keyword.begin(), sweep_keyword.end(), sweep_keyword.begin(), ::tolower);
-                            if(sweep_keyword == "sweep") {
-                                string sourceName;
-                                double start, stop, step;
-                                if (!(iss >> sourceName >> start >> stop >> step)) {
-                                    cout << "ERROR: Missing params for DC sweep. Usage: analyze DC SWEEP <src> <start> <stop> <step>\n";
-                                    continue;
-                                }
-                                if (step == 0 || (step > 0 && start > stop) || (step < 0 && start < stop)) {
-                                    cout << "ERROR: Invalid sweep parameters.\n";
-                                    continue;
-                                }
-                                circuit->analyzeDCSweep(sourceName, start, stop, step);
-                            }
-                        } else {
-                           circuit->analyzeDC();
-                        }
-                    } else if (analysisType == "tran") {
-                        double tStep, tStop;
-                        if (!(iss >> tStep >> tStop)) {
-                            cout << "ERROR: Missing time parameters for transient analysis. Usage: analyze TRAN <tstep> <tstop>\n";
-                            continue;
-                        }
-                        if (tStep <= 0 || tStop <= 0 || tStep > tStop) {
-                            cout << "ERROR: Time parameters must be positive and tStep <= tStop.\n";
-                            continue;
-                        }
-                        circuit->analyzeTransient(tStep, tStop);
-                        circuit->printTransientResults(Vtimes, voltages, currents, circuit->listNodes().size() - 1);
-                    } else {
-                        cout << "ERROR: Unknown analysis type '" << analysisType << "'. Use 'DC' or 'TRAN'.\n";
-                    }
-                } catch (const runtime_error& e) {
-                    cout << "ERROR: " << e.what() << "\n";
-                }
-            } else if (cmd == "add") {
-                string typeName;
-                if (!(iss >> typeName)) { cout << "ERROR: Missing component type. Usage: add <type><name> ...\n"; continue; }
-
-                string name = typeName;
-                char typeChar = toupper(typeName[0]);
-                try {
-                    if (circuit->hasComponent(name)) {
-                        cout << "ERROR: Component '" << name << "' already exists.\n"; continue;
-                    }
-
-                    if (name == "GND" || name == "gnd") {
-                        string node;
-                        if (!(iss >> node)) { cout << "ERROR: Missing node for ground. Usage: add GND <node>\n"; continue; }
-                        int n = getOrCreateNode(node);
-                        circuit->addComponent(new Ground("GND", n));
-                        cout << "SUCCESS: Ground connection added to node " << node << "\n";
-                    }
-                    // --- Passive Components ---
-                    else if (typeChar == 'R') {
-                        string n1_str, n2_str, val_str;
-                        if (!(iss >> n1_str >> n2_str >> val_str)) { cout << "ERROR: Usage: add R<name> <node1> <node2> <value>\n"; continue; }
-                        int n1 = getOrCreateNode(n1_str), n2 = getOrCreateNode(n2_str);
-                        double value = parseSpiceValue(val_str);
-                        if (value <= 0) { cout << "ERROR: Resistance must be positive.\n"; continue; }
-                        circuit->addComponent(new Resistor(name, n1, n2, value));
-                        cout << "SUCCESS: Resistor '" << name << "' added.\n";
-                    } else if (typeChar == 'C') {
-                        string n1_str, n2_str, val_str;
-                        if (!(iss >> n1_str >> n2_str >> val_str)) { cout << "ERROR: Usage: add C<name> <node1> <node2> <value>\n"; continue; }
-                        int n1 = getOrCreateNode(n1_str), n2 = getOrCreateNode(n2_str);
-                        double value = parseSpiceValue(val_str);
-                        if (value <= 0) { cout << "ERROR: Capacitance must be positive.\n"; continue; }
-                        circuit->addComponent(new Capacitor(name, n1, n2, value));
-                        cout << "SUCCESS: Capacitor '" << name << "' added.\n";
-                    } else if (typeChar == 'L') {
-                        string n1_str, n2_str, val_str;
-                        if (!(iss >> n1_str >> n2_str >> val_str)) { cout << "ERROR: Usage: add L<name> <node1> <node2> <value>\n"; continue; }
-                        int n1 = getOrCreateNode(n1_str), n2 = getOrCreateNode(n2_str);
-                        double value = parseSpiceValue(val_str);
-                        if (value <= 0) { cout << "ERROR: Inductance must be positive.\n"; continue; }
-                        circuit->addComponent(new Inductor(name, n1, n2, value));
-                        cout << "SUCCESS: Inductor '" << name << "' added.\n";
-                    } else if (typeChar == 'D') {
-                        string n1_str, n2_str;
-                        if (!(iss >> n1_str >> n2_str)) { cout << "ERROR: Usage: add D<name> <node1> <node2>\n"; continue; }
-                        int n1 = getOrCreateNode(n1_str), n2 = getOrCreateNode(n2_str);
-                        circuit->addComponent(new Diode(name, n1, n2));
-                        cout << "SUCCESS: Diode '" << name << "' added.\n";
-                    }
-                    // --- Independent Sources ---
-                    else if (typeChar == 'V') {
-                        if (typeName.size() > 1 && toupper(typeName[1]) == 'S') {
-                            string n1_str, n2_str, dc_str, amp_str, freq_str, phase_str = "0";
-                            if (!(iss >> n1_str >> n2_str >> dc_str >> amp_str >> freq_str)) {
-                                cout << "ERROR: Usage: add VS<name> <n1> <n2> <DC> <AMP> <FREQ> [PHASE]\n"; continue;
-                            }
-                            iss >> phase_str;
-                            double dc = parseSpiceValue(dc_str);
-                            double amp = parseSpiceValue(amp_str);
-                            double freq = parseSpiceValue(freq_str);
-                            double phase = parseSpiceValue(phase_str);
-                            circuit->addComponent(new SinVoltageSource(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str), amp, freq, phase, dc));
-                            cout << "SUCCESS: Sinusoidal Voltage Source '" << name << "' added.\n";
-                        } else if (typeName.size() > 1 && toupper(typeName[1]) == 'P') {
-                            string n1_str, n2_str, v1_str, v2_str, td_str, tr_str, tf_str, pw_str, per_str;
-                            if (!(iss >> n1_str >> n2_str >> v1_str >> v2_str >> td_str >> tr_str >> tf_str >> pw_str >> per_str)) {
-                                cout << "ERROR: Usage: add VP<name> <n1> <n2> <V1> <V2> <TD> <TR> <TF> <PW> <PER>\n"; continue;
-                            }
-                            double v1 = parseSpiceValue(v1_str);
-                            double v2 = parseSpiceValue(v2_str);
-                            double td = parseSpiceValue(td_str);
-                            double tr = parseSpiceValue(tr_str);
-                            double tf = parseSpiceValue(tf_str);
-                            double pw = parseSpiceValue(pw_str);
-                            double per = parseSpiceValue(per_str);
-                            circuit->addComponent(new PulseVoltageSource(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str),
-                                                v1, v2, td, tr, tf, pw, per));
-                            cout << "SUCCESS: Pulse Voltage Source '" << name << "' added.\n";
-                        } else {
-                            string n1_str, n2_str, val_str;
-                            if (!(iss >> n1_str >> n2_str >> val_str)) { cout << "ERROR: Usage: add V<name> <node1> <node2> <value>\n"; continue; }
-                            circuit->addComponent(new VoltageSource(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str), parseSpiceValue(val_str)));
-                            cout << "SUCCESS: DC Voltage Source '" << name << "' added.\n";
-                        }
-                    } else if (typeChar == 'I') {
-                        if (typeName.size() > 1 && toupper(typeName[1]) == 'S') {
-                            string n1_str, n2_str, dc_str, amp_str, freq_str, phase_str = "0";
-                            if (!(iss >> n1_str >> n2_str >> dc_str >> amp_str >> freq_str)) {
-                                cout << "ERROR: Usage: add IS<name> <n1> <n2> <DC> <AMP> <FREQ> [PHASE]\n"; continue;
-                            }
-                            iss >> phase_str;
-                            double dc = parseSpiceValue(dc_str);
-                            double amp = parseSpiceValue(amp_str);
-                            double freq = parseSpiceValue(freq_str);
-                            double phase = parseSpiceValue(phase_str);
-                            circuit->addComponent(new SinCurrentSource(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str), amp, freq, phase, dc));
-                            cout << "SUCCESS: Sinusoidal Current Source '" << name << "' added.\n";
-                        } else if (typeName.size() > 1 && toupper(typeName[1]) == 'P') {
-                            string n1_str, n2_str, i1_str, i2_str, td_str, tr_str, tf_str, pw_str, per_str;
-                            if (!(iss >> n1_str >> n2_str >> i1_str >> i2_str >> td_str >> tr_str >> tf_str >> pw_str >> per_str)) {
-                                cout << "ERROR: Usage: add IP<name> <n1> <n2> <I1> <I2> <TD> <TR> <TF> <PW> <PER>\n"; continue;
-                            }
-                            double i1 = parseSpiceValue(i1_str);
-                            double i2 = parseSpiceValue(i2_str);
-                            double td = parseSpiceValue(td_str);
-                            double tr = parseSpiceValue(tr_str);
-                            double tf = parseSpiceValue(tf_str);
-                            double pw = parseSpiceValue(pw_str);
-                            double per = parseSpiceValue(per_str);
-                            circuit->addComponent(new PulseCurrentSource(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str),
-                                                i1, i2, td, tr, tf, pw, per));
-                            cout << "SUCCESS: Pulse Current Source '" << name << "' added.\n";
-                        } else {
-                            string n1_str, n2_str, val_str;
-                            if (!(iss >> n1_str >> n2_str >> val_str)) { cout << "ERROR: Usage: add I<name> <node1> <node2> <value>\n"; continue; }
-                            circuit->addComponent(new CurrentSource(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str), parseSpiceValue(val_str)));
-                            cout << "SUCCESS: DC Current Source '" << name << "' added.\n";
-                        }
-                    }
-                    // --- Dependent Sources ---
-                    else if (typeChar == 'E') { // VCVS
-                        string n1_str, n2_str, cn1_str, cn2_str, gain_str;
-                        if (!(iss >> n1_str >> n2_str >> cn1_str >> cn2_str >> gain_str)) {
-                            cout << "ERROR: Usage: add E<name> <n+> <n-> <c_n+> <c_n-> <gain>\n"; continue;
-                        }
-                        circuit->addComponent(new VCVS(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str),
-                                            getOrCreateNode(cn1_str), getOrCreateNode(cn2_str), parseSpiceValue(gain_str)));
-                        cout << "SUCCESS: VCVS '" << name << "' added.\n";
-                    } else if (typeChar == 'G') { // VCCS
-                        string n1_str, n2_str, cn1_str, cn2_str, gm_str;
-                        if (!(iss >> n1_str >> n2_str >> cn1_str >> cn2_str >> gm_str)) {
-                            cout << "ERROR: Usage: add G<name> <n+> <n-> <c_n+> <c_n-> <transconductance>\n"; continue;
-                        }
-                        circuit->addComponent(new VCCS(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str),
-                                            getOrCreateNode(cn1_str), getOrCreateNode(cn2_str), parseSpiceValue(gm_str)));
-                        cout << "SUCCESS: VCCS '" << name << "' added.\n";
-                    } else if (typeChar == 'H') { // CCVS
-                        string n1_str, n2_str, v_src_name, gain_str;
-                        if (!(iss >> n1_str >> n2_str >> v_src_name >> gain_str)) {
-                            cout << "ERROR: Usage: add H<name> <n+> <n-> <v_source_name> <gain>\n"; continue;
-                        }
-                        circuit->addComponent(new CCVS(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str),
-                                                    v_src_name, parseSpiceValue(gain_str)));
-                        cout << "SUCCESS: CCVS '" << name << "' added.\n";
-                    } else if (typeChar == 'F') { // CCCS
-                        string n1_str, n2_str, v_src_name, gain_str;
-                        if (!(iss >> n1_str >> n2_str >> v_src_name >> gain_str)) {
-                            cout << "ERROR: Usage: add F<name> <n+> <n-> <v_source_name> <gain>\n"; continue;
-                        }
-                        circuit->addComponent(new CCCS(name, getOrCreateNode(n1_str), getOrCreateNode(n2_str),
-                                                    v_src_name, parseSpiceValue(gain_str)));
-                        cout << "SUCCESS: CCCS '" << name << "' added.\n";
-                    }
-                    else {
-                        cout << "ERROR: Unknown component type '" << typeName << "'.\n";
-                    }
-                } catch (const exception& e) {
-                    cout << "ERROR: Invalid input format. " << e.what() << "\n";
-                }
-            } else if (cmd == ".list") {
-                string filter;
-                iss >> filter;
-                ComponentType filterType = static_cast<ComponentType>(-1);
-                if (!filter.empty()) {
-                    if (toupper(filter[0]) == 'R') filterType = RESISTOR;
-                    else if (toupper(filter[0]) == 'C') filterType = CAPACITOR;
-                    else if (toupper(filter[0]) == 'L') filterType = INDUCTOR;
-                    else if (toupper(filter[0]) == 'V') filterType = VOLTAGE_SOURCE;
-                }
-
-                auto components = circuit->listComponents(filterType);
-                cout << "Components in '" << currentCircuitFile << "':\n";
-                if (components.empty()) {
-                    cout << "  (No components to display)\n";
-                } else {
-                    for (const auto& comp : components) {
-                        cout << "  " << comp << "\n";
-                    }
-                }
-            } else if (cmd == ".nodes") {
-                 auto nodes = circuit->listNodes();
-                 cout << "Available nodes in '" << currentCircuitFile << "':\n";
-                 for (const auto& node : nodes) {
-                     cout << "  " << node << "\n";
-                 }
-            } else if (cmd == "delete") {
-                string name;
-                if (!(iss >> name)) { cout << "ERROR: Missing component name.\n"; continue; }
-                if (circuit->deleteComponent(name)) {
-                    cout << "SUCCESS: Component '" << name << "' deleted.\n";
-                } else {
-                    cout << "ERROR: Component '" << name << "' not found.\n";
-                }
-            } else if (cmd == ".rename") {
-                 string subcmd, oldName, newName;
-                if (!(iss >> subcmd >> oldName >> newName)) { cout << "ERROR: Invalid syntax. Usage: .rename [node|element] <old> <new>\n"; continue; }
-                if (subcmd == "node") {
-                    if (circuit->renameNode(oldName, newName)) {
-                        cout << "SUCCESS: Node renamed from " << oldName << " to " << newName << ".\n";
-                    } else { cout << "ERROR: Could not rename node. Check if old name exists and new name is not taken.\n"; }
-                } else if (subcmd == "element") {
-                    if (circuit->renameComponent(oldName, newName)) {
-                        cout << "SUCCESS: Element renamed from " << oldName << " to " << newName << ".\n";
-                    } else { cout << "ERROR: Could not rename element. Check if old name exists and new name is not taken.\n"; }
-                } else { cout << "ERROR: Invalid subcommand. Use 'node' or 'element'.\n"; }
+        // Update text boxes if we're actively editing one
+        if (textInputActive) {
+            if (activeTextBox) {
+                activeTextBox->text = inputText;
             }
-            else {
-                cout << "ERROR: Unknown command '" << cmd << "'. Type 'help' for a list of commands.\n";
+            else if (SaveAsDialog) {
+                newFilename = inputText;
             }
         }
+
+        // Clear screen
+        SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+        SDL_RenderClear(renderer);
+
+        // Draw circuit area
+        SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, 255);
+        SDL_RenderFillRect(renderer, &circuitArea);
+        SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+        SDL_RenderDrawRect(renderer, &circuitArea);
+
+        // Draw plot area
+        SDL_SetRenderDrawColor(renderer, WHITE.r, WHITE.g, WHITE.b, 255);
+        SDL_RenderFillRect(renderer, &plotArea);
+        SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
+        SDL_RenderDrawRect(renderer, &plotArea);
+
+        // Draw the circuit
+        if (circuit) {
+            calculateNodePositions(*circuit);
+            drawCircuit(*circuit, renderer);
+        }
+
+        // Draw plots if we have data
+        if (!voltages.empty() && showVoltage) {
+            plotSignals(renderer, voltages, Vtimes, plotArea);
+        }
+
+        // Draw toolbar
+        drawToolbar(renderer);
+
+        // Draw text boxes
+        renderTextBox(node1Box);
+        renderTextBox(node2Box);
+        renderTextBox(valueBox);
+
+        // Draw file menu if open
+        if (FileMenu) {
+            showFileMenu(renderer, fileMenuRect);
+        }
+
+        // Draw edit menu if open
+        if (EditMenu) {
+            showEditMenu(renderer, editMenuRect);
+        }
+
+        // Draw component library if open
+        if (ComponentLibrary) {
+            renderComponentLibrary(renderer);
+        }
+
+        // Draw analysis settings if open
+        if (AnalysisSettings) {
+            showAnalysisSettings(renderer);
+        }
+
+        // Draw file dialog if open
+        if (FileDialog) {
+            showFileDialog(renderer, txtFiles);
+        }
+
+        // Draw save as dialog if open
+        if (SaveAsDialog) {
+            showSaveAsDialog(renderer, newFilename);
+        }
+
+        // Draw selected component properties if one is selected
+        if (selectedComponent) {
+            showComponentProperties(renderer, selectedComponent);
+        }
+
+        // Update screen
+        SDL_RenderPresent(renderer);
     }
 
-    if (circuit) {
-        delete circuit;
-    }
+    // Cleanup
+    TTF_CloseFont(font);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    TTF_Quit();
+    SDL_Quit();
 
-    cout << "Exiting simulator. Goodbye!\n";
+    delete circuit;
     return 0;
 }
-
