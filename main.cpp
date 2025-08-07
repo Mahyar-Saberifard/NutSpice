@@ -1670,14 +1670,14 @@ TTF_Font* font = nullptr;
 
 struct Button {
     SDL_Rect rect;
-    std::string text;
+    string text;
     SDL_Color color;
     bool isActive;
 };
 
 struct TextBox {
     SDL_Rect rect;
-    std::string text;
+    string text;
     bool isActive;
 };
 
@@ -1778,6 +1778,9 @@ void renderTextBox(const TextBox& box) {
     SDL_RenderFillRect(renderer, &box.rect);
     SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
     SDL_RenderDrawRect(renderer, &box.rect);
+    if (box.text == "") {
+        return;
+    }
     renderText(box.text, box.rect.x + 5, box.rect.y + 5, BLACK);
 }
 
@@ -1997,6 +2000,27 @@ enum AppState {
 
 string selectedComponentType = "";
 AppState currentState = MAIN_VIEW;
+vector<Circuit*> undoStack;
+vector<Circuit*> redoStack;
+string copiedComponent;
+
+void saveUndoState(Circuit*& currentCircuit) {
+    // Clear redo stack when making new changes
+    for (auto circuit : redoStack) {
+        delete circuit;
+    }
+    redoStack.clear();
+
+    // Save current state to undo stack
+    Circuit* copy = new Circuit(*currentCircuit);
+    undoStack.push_back(copy);
+
+    // Limit undo stack size
+    if (undoStack.size() > 10) {
+        delete undoStack.front();
+        undoStack.erase(undoStack.begin());
+    }
+}
 
 void handleProbe(int x, int y, const Circuit& circuit) {
     if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
@@ -2254,100 +2278,40 @@ void handleComponentSelection(Circuit* circuit, int x, int y) {
     }
 }
 
-void handleMainViewClick(Circuit circuit, int x, int y) {
-    if (isMouseOver(circuitArea, x, y)) {
-        selectedComponent = nullptr;
-        calculateNodePositions(circuit);
-
-        for (const auto& comp : circuit.getComponents()) {
-            SDL_Point p1 = nodePositions[comp->node1];
-            SDL_Point p2 = nodePositions[comp->node2];
-
-            if (isPointNearLine(x, y, p1.x, p1.y, p2.x, p2.y, 10)) {
-                selectedComponent = comp;
-                break;
-            }
-        }
-    }
-}
-
-void handlePlotClick(int x, int y) {
-    SDL_Rect backBtn = {50, 50, 100, 40};
-    if (isMouseOver(backBtn, x, y)) {
-        currentState = MAIN_VIEW;
-    }
-}
-
-void handleAnalysisClick(int x, int y) {
-    SDL_Rect analysisWindow = {250, 150, 350, 300};
-
-    if (!isMouseOver(analysisWindow, x, y)) {
-        currentState = MAIN_VIEW;
-        return;
-    }
-
-    SDL_Rect runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40};
-    if (isMouseOver(runBtn, x, y)) {
-        currentState = PLOT_VIEW;
-    }
-
-    SDL_Rect cancelBtn = {analysisWindow.x + 200, analysisWindow.y + 220, 100, 40};
-    if (isMouseOver(cancelBtn, x, y)) {
-        currentState = MAIN_VIEW;
-    }
-}
-
-void handleAddComponentClick(Circuit& circuit, int x, int y) {
-
-    if (isMouseOver(addBtn.rect, x, y)) {
-        string name = nameBox.text;
-        int node1 = std::stoi(node1Box.text);
-        int node2 = std::stoi(node2Box.text);
-        double value = std::stod(valueBox.text);
-
-        Component* newComp = nullptr;
-
-        if (selectedComponentType == "Resistor")
-            newComp = new Resistor(name, node1, node2, value);
-        else if (selectedComponentType == "Capacitor")
-            newComp = new Capacitor(name, node1, node2, value);
-        else if (selectedComponentType == "Inductor")
-            newComp = new Inductor(name, node1, node2, value);
-        else if (selectedComponentType == "VoltageSource")
-            newComp = new VoltageSource(name, node1, node2, value);
-        else if (selectedComponentType == "CurrentSource")
-            newComp = new CurrentSource(name, node1, node2, value);
-        else if (selectedComponentType == "Diode")
-            newComp = new Diode(name, node1, node2);
-        else if (selectedComponentType == "Ground")
-            newComp = new Ground(name, node1);
-
-        if (newComp) {
-            circuit.addComponent(newComp);
-            currentState = MAIN_VIEW;
-        }
-    }
-
-    if (isMouseOver(cancelBtn.rect, x, y)) {
-        currentState = MAIN_VIEW;
-    }
-}
-
 void handleComponentPlacement(Circuit* circuit, int x, int y) {
     if (!selectedComponentType.empty() &&
-        x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
-        y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
-
+    x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
+    y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
         static int compCount = 1;
         string name = selectedComponentType.substr(0,1) + to_string(compCount++);
-        int node1 = 1; // Default nodes - you might want to implement node creation/selection
-        int node2 = 2;
-        double value = 1000.0; // Default value
+
+        // Find nearest node or create new one if far from existing nodes
+        int node1 = -1, node2 = -1;
+        int minDist = 20; // pixels
+        for (const auto& node : nodePositions) {
+            int dist = sqrt(pow(x - node.second.x, 2) + pow(y - node.second.y, 2));
+            if (dist < minDist) {
+                if (node1 == -1) node1 = node.first;
+                else node2 = node.first;
+                minDist = dist;
+            }
+        }
+
+        // If no nearby nodes, create new ones
+        if (node1 == -1) {
+            node1 = nextNodeNumber++;
+            nodePositions[node1] = {x, y};
+        }
+        if (node2 == -1 && selectedComponentType != "Ground") {
+            node2 = nextNodeNumber++;
+            nodePositions[node2] = {x + 50, y}; // Place second node offset
+        }
 
         Component* newComp = nullptr;
+        double defaultValue = 1000.0;
 
         if (selectedComponentType == "Resistor") {
-            newComp = new Resistor(name, node1, node2, value);
+            newComp = new Resistor(name, node1, node2, defaultValue);
         }
         else if (selectedComponentType == "Capacitor") {
             newComp = new Capacitor(name, node1, node2, 1e-6); // Default 1uF
@@ -2369,11 +2333,11 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
         }
 
         if (newComp) {
-            newComp->setPosition(x, y);
+            saveUndoState(circuit);
             circuit->addComponent(newComp);
             selectedComponentType = ""; // Reset selection
         }
-        }
+    }
 }
 
 void addComponentAtPosition(Circuit& circuit, int x, int y) {
@@ -2395,21 +2359,6 @@ void addComponentAtPosition(Circuit& circuit, int x, int y) {
     if (newComp) {
         newComp->setPosition(x, y);
         circuit.addComponent(newComp);
-    }
-}
-
-void handleAnalyzeButton(Circuit* circuit) {
-    if (!circuit) return;
-
-    try {
-        double tStep = 0.001;
-        double tStop = 0.1;
-
-        cout << "Running transient analysis..." << endl;
-        circuit->analyzeTransient(tStep, tStop);
-        circuit->printTransientResults(Vtimes, voltages, currents, circuit->listNodes().size() - 1);
-    } catch (const exception& e) {
-        cout << "Analysis error: " << e.what() << endl;
     }
 }
 
@@ -2462,7 +2411,6 @@ void handleToolbarButton(int x, int y) {
     }
 }
 
-// Update the event handling for component library
 void handleComponentLibraryClick(int x, int y) {
     if (isMouseOver(passiveBtn.rect, x, y)) {
         showPassives = !showPassives;
@@ -2491,52 +2439,40 @@ void handleComponentLibraryClick(int x, int y) {
     else if (showPassives) {
         if (isMouseOver(resBtn.rect, x, y)) {
             selectedComponentType = "Resistor";
-            ComponentLibrary = false;
-            // Show properties dialog or start placement
         }
         else if (isMouseOver(capBtn.rect, x, y)) {
             selectedComponentType = "Capacitor";
-            ComponentLibrary = false;
         }
         else if (isMouseOver(indBtn.rect, x, y)) {
             selectedComponentType = "Inductor";
-            ComponentLibrary = false;
         }
     }
     else if (showSources) {
         if (isMouseOver(vSrcBtn.rect, x, y)) {
             selectedComponentType = "VoltageSource";
-            ComponentLibrary = false;
         }
         else if (isMouseOver(iSrcBtn.rect, x, y)) {
             selectedComponentType = "CurrentSource";
-            ComponentLibrary = false;
         }
         else if (isMouseOver(gndBtn.rect, x, y)) {
             selectedComponentType = "Ground";
-            ComponentLibrary = false;
         }
     }
     else if (showSemis && isMouseOver(diodeBtn.rect, x, y)) {
         selectedComponentType = "Diode";
-        ComponentLibrary = false;
     }
     else if (showDependents) {
         if (isMouseOver(vcvsBtn.rect, x, y)) {
             selectedComponentType = "VCVS";
-            ComponentLibrary = false;
         }
         else if (isMouseOver(vccsBtn.rect, x, y)) {
             selectedComponentType = "VCCS";
-            ComponentLibrary = false;
         }
         else if (isMouseOver(ccvsBtn.rect, x, y)) {
             selectedComponentType = "CCVS";
-            ComponentLibrary = false;
         }
         else if (isMouseOver(cccsBtn.rect, x, y)) {
             selectedComponentType = "CCCS";
-            ComponentLibrary = false;
         }
     }
 }
@@ -2784,6 +2720,11 @@ int main(int argc, char* argv[]) {
     string newFilename = "";
 
     while (running) {
+
+        if (undoStack.empty()) {
+            saveUndoState(circuit);
+        }
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = false;
@@ -2874,6 +2815,85 @@ int main(int argc, char* argv[]) {
                         }
                         else if (y >= fileMenuRect.y + 200 && y <= fileMenuRect.y + 230) { // Exit
                             running = false;
+                        }
+                    }
+                }
+
+                if (EditMenu) {
+                    if (x >= editMenuRect.x + 10 && x <= editMenuRect.x + 130) {
+                        if (y >= editMenuRect.y + 40 && y <= editMenuRect.y + 70) { // Undo
+                            if (!undoStack.empty()) {
+                                saveUndoState(circuit); // Current state becomes redo
+                                delete circuit;
+                                circuit = new Circuit(*undoStack.back());
+                                undoStack.pop_back();
+                            }
+                            EditMenu = false;
+                        }
+                        else if (y >= editMenuRect.y + 80 && y <= editMenuRect.y + 110) { // Redo
+                            if (!redoStack.empty()) {
+                                saveUndoState(circuit); // Current state becomes undo
+                                delete circuit;
+                                circuit = new Circuit(*redoStack.back());
+                                redoStack.pop_back();
+                            }
+                            EditMenu = false;
+                        }
+                        else if (y >= editMenuRect.y + 120 && y <= editMenuRect.y + 150) { // Copy
+                            if (selectedComponent) {
+                                copiedComponent = selectedComponent->getInfo();
+                            }
+                            EditMenu = false;
+                        }
+                        else if (y >= editMenuRect.y + 160 && y <= editMenuRect.y + 190) { // Paste
+                            if (!copiedComponent.empty()) {
+                                istringstream iss(copiedComponent);
+                                string type, name, node1, node2, valueStr;
+                                iss >> type >> name >> node1 >> node2 >> valueStr;
+
+                                // Generate unique name
+                                static int pasteCount = 1;
+                                name = name + "_copy" + to_string(pasteCount++);
+
+                                // Create new component
+                                Component* newComp = nullptr;
+                                if (type == "Resistor") {
+                                    newComp = new Resistor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "Capacitor") {
+                                    newComp = new Capacitor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "Inductor") {
+                                    newComp = new Inductor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "VoltageSource") {
+                                    newComp = new VoltageSource(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "CurrentSource") {
+                                    newComp = new CurrentSource(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                else if (type == "Diode") {
+                                    newComp = new Diode(name, getOrCreateNode(node1), getOrCreateNode(node2));
+                                }
+                                else if (selectedComponentType == "Ground") {
+                                    newComp = new Ground(name, getOrCreateNode(node1));
+                                }
+
+                                if (newComp) {
+                                    saveUndoState(circuit);
+                                    circuit->addComponent(newComp);
+                                }
+                            }
+                            EditMenu = false;
+                        }
+
+                        else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) { // Delete
+                            if (selectedComponent) {
+                                saveUndoState(circuit);
+                                circuit->deleteComponent(selectedComponent->name);
+                                selectedComponent = nullptr;
+                            }
+                            EditMenu = false;
                         }
                     }
                 }
