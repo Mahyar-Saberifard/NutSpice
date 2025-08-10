@@ -184,12 +184,114 @@ double parseSpiceValue(const string& valStr) {
     return num;
 }
 
+
+// Forward declaration of Component
+class Component;
+
+
+class Port {
+public:
+    SDL_Rect rect;
+    bool isInput;
+    Component* parentComponent;  // Using forward-declared Component
+    int nodeNumber;
+
+    Port(bool input, Component* parent, int node)
+            : isInput(input), parentComponent(parent), nodeNumber(node) {
+        rect = {0, 0, 10, 10};  // Default size
+    }
+};
+
+
+class Node {
+public:
+    int number;
+    string name;
+    SDL_Point position;
+    vector<Port*> connectedPorts;
+
+    Node(int num, const string& nm, int x, int y)
+            : number(num), name(nm), position({x,y}) {}
+};
+
+class Wire {
+public:
+    Port* startPort;
+    Port* endPort;
+    vector<SDL_Point> waypoints;
+    bool isSelected;
+
+    Wire(Port* start, Port* end) : startPort(start), endPort(end), isSelected(false) {}
+
+    void draw(SDL_Renderer* renderer) {
+        SDL_SetRenderDrawColor(renderer, 128, 0, 128, 255);
+        if (isSelected) {
+            SDL_SetRenderDrawColor(renderer, 213, 94, 0, 255);
+        }
+
+        // Draw line from start to end with waypoints
+        SDL_Point prev = {startPort->rect.x + startPort->rect.w/2,
+                          startPort->rect.y + startPort->rect.h/2};
+
+        for (auto& wp : waypoints) {
+            SDL_RenderDrawLine(renderer, prev.x, prev.y, wp.x, wp.y);
+            prev = wp;
+        }
+
+        SDL_RenderDrawLine(renderer, prev.x, prev.y,
+                           endPort->rect.x + endPort->rect.w/2,
+                           endPort->rect.y + endPort->rect.h/2);
+    }
+};
+
 class Component {
 
 protected:
     int posX, posY;
-public:
+    vector<Port*> inputPorts;
+    vector<Port*> outputPorts;
+    SDL_Point position;
+    int width = 40;  // Default component width
 
+public:
+    virtual ~Component() {
+        // Clean up ports
+        for (auto port : inputPorts) delete port;
+        for (auto port : outputPorts) delete port;
+    }
+
+    virtual vector<Port*> getPorts() {
+        vector<Port*> allPorts = inputPorts;
+        allPorts.insert(allPorts.end(), outputPorts.begin(), outputPorts.end());
+        return allPorts;
+    }
+
+    virtual void updatePortPositions() {
+        // Update port positions based on component position
+        for (size_t i = 0; i < inputPorts.size(); i++) {
+            inputPorts[i]->rect.x = position.x - 10;
+            inputPorts[i]->rect.y = position.y + i * 20;
+        }
+        for (size_t i = 0; i < outputPorts.size(); i++) {
+            outputPorts[i]->rect.x = position.x + width + 10;
+            outputPorts[i]->rect.y = position.y + i * 20;
+        }
+    }
+
+    void setPosition(int x, int y) {
+        position = {x, y};
+        updatePortPositions();
+    }
+
+    void addInputPort(int nodeNumber) {
+        inputPorts.push_back(new Port(true, this, nodeNumber));
+        updatePortPositions();
+    }
+
+    void addOutputPort(int nodeNumber) {
+        outputPorts.push_back(new Port(false, this, nodeNumber));
+        updatePortPositions();
+    }
 
     ComponentType type;
     string name;
@@ -201,7 +303,7 @@ public:
     Component(ComponentType t, const string& n, int n1, int n2, double val)
             : type(t), name(n), node1(n1), node2(n2), value(val) {}
 
-    virtual ~Component() {}
+
 
     virtual void stamp(vector<vector<double>>& G,
                        vector<vector<double>>& B,
@@ -232,9 +334,6 @@ public:
             case CCCS_SOURCE: typeStr = "CCCS Source"; break;
         }
         return typeStr + " " + name + " " + getNodeName(node1) + " " + getNodeName(node2) + " " + to_string(value);
-    }    virtual void setPosition(int x, int y) {
-        posX = x;
-        posY = y;
     }
     virtual std::pair<int,int> getPosition() {
         return {posX, posY};
@@ -245,15 +344,130 @@ public:
 };
 
 class Circuit {
+
+
+    vector<vector<double>> G;  // Conductance matrix
+    vector<vector<double>> B;  // Current/voltage relationship matrix
+    vector<vector<double>> C;  // Voltage/current relationship matrix
+    vector<vector<double>> D;  // Voltage source matrix
+    vector<double> J;         // Current source vector
+    vector<double> E;         // Voltage source vector
+
+    // Other existing members...
     vector<Component*> components;
+    int nextVariable;
     int maxNode;
     static double currentTimeStep;
     static double currentTime;
     std::map<std::string, int> nodeMap;          // Maps node names to numbers
     std::map<int, std::string> reverseNodeMap;   // Maps node numbers to names
     int nextNodeNumber = 1;                      // Next available node number
+    vector<Wire*> wires;
+    map<int, Node*> nodes;  // Node number to Node object
 
 public:
+
+    void stampMatrix() {
+        // Clear matrices
+        G.clear(); B.clear(); C.clear(); D.clear();
+        J.clear(); E.clear();
+
+        // Initialize based on node count
+        int maxNode = 0;
+        for (const auto& node : nodes) {
+            if (node.first > maxNode) maxNode = node.first;
+        }
+        int numNodes = maxNode;
+
+        // Count voltage sources
+        int numVSources = 0;
+        for (auto comp : components) {
+            if (comp->type == VOLTAGE_SOURCE ||
+                comp->type == SIN_VOLTAGE_SOURCE ||
+                comp->type == PULSE_VOLTAGE_SOURCE) {
+                numVSources++;
+            }
+        }
+
+        // Resize matrices
+        G.resize(numNodes, vector<double>(numNodes, 0.0));
+        B.resize(numNodes, vector<double>(numVSources, 0.0));
+        C.resize(numVSources, vector<double>(numNodes, 0.0));
+        D.resize(numVSources, vector<double>(numVSources, 0.0));
+        J.resize(numNodes, 0.0);
+        E.resize(numVSources, 0.0);
+
+        // Stamp components
+        int vsCount = 0;
+        for (auto comp : components) {
+            comp->stamp(G, B, C, D, J, E, vsCount);
+        }
+
+        // Handle wire connections by merging nodes
+        for (auto wire : wires) {
+            int node1 = wire->startPort->nodeNumber;
+            int node2 = wire->endPort->nodeNumber;
+
+            if (node1 != node2 && node1 > 0 && node2 > 0) {  // Skip ground node (0)
+                // Adjust for 0-based indexing
+                int row1 = node1 - 1;
+                int row2 = node2 - 1;
+
+                // Merge node2 into node1
+                for (int i = 0; i < numNodes; i++) {
+                    G[row1][i] += G[row2][i];
+                    G[i][row1] += G[i][row2];
+                    // Clear merged node
+                    G[row2][i] = 0;
+                    G[i][row2] = 0;
+                }
+
+                // Update all ports connected to node2
+                for (auto comp : components) {
+                    for (auto port : comp->getPorts()) {
+                        if (port->nodeNumber == node2) {
+                            port->nodeNumber = node1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    void addWire(Port* start, Port* end) {
+        // Ensure ports aren't already connected
+        for (auto wire : wires) {
+            if ((wire->startPort == start && wire->endPort == end) ||
+                (wire->startPort == end && wire->endPort == start)) {
+                return;
+            }
+        }
+
+        wires.push_back(new Wire(start, end));
+
+        // Update node connections
+        if (start->isInput && !end->isInput) {
+            // Output to input connection
+            connectNodes(end->nodeNumber, start->nodeNumber);
+        } else if (!start->isInput && end->isInput) {
+            // Input to output connection
+            connectNodes(start->nodeNumber, end->nodeNumber);
+        }
+    }
+
+    void connectNodes(int node1, int node2) {
+        // Merge node2 into node1
+        Node* primary = nodes[node1];
+        Node* secondary = nodes[node2];
+
+        for (auto port : secondary->connectedPorts) {
+            port->nodeNumber = node1;
+            primary->connectedPorts.push_back(port);
+        }
+
+        nodes.erase(node2);
+        delete secondary;
+    }
     Circuit() : maxNode(0) {}
 
     ~Circuit() {
@@ -2791,7 +3005,7 @@ int main(int argc, char* argv[]) {
                     darkModeBtn.text = darkMode ? "Light Mode" : "Dark Mode";
                 }
 
-                // Handle toolbar buttons
+                    // Handle toolbar buttons
                 else if (y <= 40) {
                     if (x >= 10 && x <= 90) { // File button
                         FileMenu = !FileMenu;
