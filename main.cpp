@@ -252,12 +252,37 @@ protected:
     vector<Port*> outputPorts;
     SDL_Point position;
     int width = 40;  // Default component width
+    SDL_Rect rect;
+    vector<Port*> ports;
+    SDL_Color color;
+
 
 public:
     virtual ~Component() {
         // Clean up ports
         for (auto port : inputPorts) delete port;
         for (auto port : outputPorts) delete port;
+    }
+
+    virtual void draw(SDL_Renderer* renderer) {
+        // Draw component body
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
+        SDL_RenderFillRect(renderer, &rect);
+
+        // Draw component name
+        SDL_Color textColor = {255, 255, 255, 255};
+        SDL_Surface* surface = TTF_RenderText_Solid(TTF_OpenFont("C:\\Windows\\Fonts\\consola.ttf", 16), name.c_str(), textColor);
+        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+        SDL_Rect textRect = {rect.x + 5, rect.y + 5, surface->w, surface->h};
+        SDL_RenderCopy(renderer, texture, nullptr, &textRect);
+        SDL_FreeSurface(surface);
+        SDL_DestroyTexture(texture);
+
+        // Draw ports
+        for (auto port : ports) {
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_RenderFillRect(renderer, &port->rect);
+        }
     }
 
     virtual vector<Port*> getPorts() {
@@ -2682,6 +2707,66 @@ void drawComponent(SDL_Renderer* renderer, Component* comp) {
     }
 }
 
+void renderCircuit(SDL_Renderer* renderer, const vector<Component*>& components,
+                   const vector<Wire*>& wires, const map<int, Node*>& nodes) {
+    // Draw components
+    for (auto comp : components) {
+        comp->draw(renderer);
+
+        // Draw ports
+        for (auto port : comp->getPorts()) {
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_RenderFillRect(renderer, &port->rect);
+        }
+    }
+
+    // Draw wires
+    for (auto wire : wires) {
+        wire->draw(renderer);
+    }
+
+    // Draw nodes
+    for (auto& node : nodes) {
+        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+        SDL_Rect nodeRect = {node.second->position.x - 5,
+                             node.second->position.y - 5,
+                             10, 10};
+        SDL_RenderFillRect(renderer, &nodeRect);
+    }
+}
+void handleMouseClick(int x, int y, vector<Component*>& components,
+                      Port*& currentlyConnectingPort, Circuit* circuit) {
+    // Check for port clicks
+    Port* clickedPort = nullptr;
+    for (auto comp : components) {
+        for (auto port : comp->getPorts()) {
+            if (x >= port->rect.x && x <= port->rect.x + port->rect.w &&
+                y >= port->rect.y && y <= port->rect.y + port->rect.h) {
+                clickedPort = port;
+                break;
+            }
+        }
+        if (clickedPort) break;
+    }
+
+    if (clickedPort) {
+        if (currentlyConnectingPort) {
+            // Complete the connection
+            if (currentlyConnectingPort != clickedPort &&
+                currentlyConnectingPort->isInput != clickedPort->isInput) {
+                circuit->addWire(currentlyConnectingPort, clickedPort);
+            }
+            currentlyConnectingPort = nullptr;
+        } else {
+            // Start new connection
+            currentlyConnectingPort = clickedPort;
+        }
+    } else {
+        // Handle other clicks (component selection, etc.)
+        currentlyConnectingPort = nullptr;
+    }
+}
+
 
 // not used //
 
@@ -2832,17 +2917,7 @@ void showAddComponentDialog(SDL_Renderer* renderer, Circuit& circuit) {
     renderButton(cancelBtn);
 }
 
-void renderCircuit(SDL_Renderer* renderer, Circuit& circuit, TTF_Font* font) {
-    for (auto comp : circuit.getComponents()) {
-        drawComponent(renderer, comp);
 
-        std::pair<int, int> pos = comp->getPosition();
-        int x = pos.first;
-        int y = pos.second;
-
-
-    }
-}
 
 void addComponentAtPosition(Circuit& circuit, int x, int y) {
     static int compCount = 1;
@@ -2995,6 +3070,8 @@ int main(int argc, char* argv[]) {
                 running = false;
             }
             else if (event.type == SDL_MOUSEBUTTONDOWN) {
+
+
                 int x, y;
                 SDL_GetMouseState(&x, &y);
 
