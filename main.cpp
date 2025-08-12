@@ -209,8 +209,13 @@ enum PlacementMode {
     PLACE_CURRENT_SOURCE,
     PLACE_DIODE,
     PLACE_GROUND,
-    PLACE_WIRE
+    PLACE_WIRE  // Add this for wire placement
 };
+
+void drawWire(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, SDL_Color color) {
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+}
 
 PlacementMode currentPlacementMode = PLACE_NONE;
 SDL_Point placementStartPoint = {0, 0};
@@ -365,8 +370,18 @@ class Circuit {
     std::map<std::string, int> nodeMap;          // Maps node names to numbers
     std::map<int, std::string> reverseNodeMap;   // Maps node numbers to names
     int nextNodeNumber = 1;                      // Next available node number
+    vector<pair<int, int>> wireConnections; // Store node pairs for wires
 
 public:
+    // ... existing methods ...
+
+    void addWire(int node1, int node2) {
+        wireConnections.emplace_back(node1, node2);
+    }
+
+    const vector<pair<int, int>>& getWires() const {
+        return wireConnections;
+    }
     Circuit() : maxNode(0) {}
 
     ~Circuit() {
@@ -2937,67 +2952,90 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
     }
 
     if (isPlacingComponent) {
+
         // Second click - finish placement
-        string name = "";
-        Component* newComp = nullptr;
-        double defaultValue = 0.0;
+        if (currentPlacementMode == PLACE_WIRE) {
+            int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
+            int node2 = findOrCreateNodeAt(x, y);
 
-        // Find or create nodes at both positions
-        int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
-        int node2 = findOrCreateNodeAt(x, y);
-
-        switch(currentPlacementMode) {
-            case PLACE_RESISTOR:
-                name = "R" + to_string(compCount++);
-                defaultValue = 1000.0;
-                newComp = new Resistor(name, node1, node2, defaultValue);
-                break;
-            case PLACE_CAPACITOR:
-                name = "C" + to_string(compCount++);
-                defaultValue = 1e-6;
-                newComp = new Capacitor(name, node1, node2, defaultValue);
-                break;
-            case PLACE_INDUCTOR:
-                name = "L" + to_string(compCount++);
-                defaultValue = 1e-3;
-                newComp = new Inductor(name, node1, node2, defaultValue);
-                break;
-            case PLACE_VOLTAGE_SOURCE:
-                name = "V" + to_string(compCount++);
-                defaultValue = 5.0;
-                newComp = new VoltageSource(name, node1, node2, defaultValue);
-                break;
-            case PLACE_CURRENT_SOURCE:
-                name = "I" + to_string(compCount++);
-                defaultValue = 0.1;
-                newComp = new CurrentSource(name, node1, node2, defaultValue);
-                break;
-            case PLACE_DIODE:
-                name = "D" + to_string(compCount++);
-                newComp = new Diode(name, node1, node2);
-                break;
-            case PLACE_GROUND:
-                name = "GND" + to_string(compCount++);
-                newComp = new Ground(name, node1);
-                break;
-            default:
-                break;
-        }
-
-        if (newComp) {
             saveUndoState(circuit);
-            circuit->addComponent(newComp);
-            cout << "Added " << newComp->getType() << " " << name
-                 << " between nodes " << node1 << " and " << node2 << endl;
+            circuit->addWire(node1, node2);
+            cout << "Created wire between node " << node1 << " and " << node2 << endl;
+        }
+        else {
+            // Existing component placement code...
+            string name = "";
+            Component* newComp = nullptr;
+            double defaultValue = 0.0;
+
+            // Find or create nodes at both positions
+            int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
+            int node2 = findOrCreateNodeAt(x, y);
+
+            switch(currentPlacementMode) {
+                case PLACE_RESISTOR:
+                    name = "R" + to_string(compCount++);
+                    defaultValue = 1000.0;
+                    newComp = new Resistor(name, node1, node2, defaultValue);
+                    break;
+                case PLACE_CAPACITOR:
+                    name = "C" + to_string(compCount++);
+                    defaultValue = 1e-6;
+                    newComp = new Capacitor(name, node1, node2, defaultValue);
+                    break;
+                case PLACE_INDUCTOR:
+                    name = "L" + to_string(compCount++);
+                    defaultValue = 1e-3;
+                    newComp = new Inductor(name, node1, node2, defaultValue);
+                    break;
+                case PLACE_VOLTAGE_SOURCE:
+                    name = "V" + to_string(compCount++);
+                    defaultValue = 5.0;
+                    newComp = new VoltageSource(name, node1, node2, defaultValue);
+                    break;
+                case PLACE_CURRENT_SOURCE:
+                    name = "I" + to_string(compCount++);
+                    defaultValue = 0.1;
+                    newComp = new CurrentSource(name, node1, node2, defaultValue);
+                    break;
+                case PLACE_DIODE:
+                    name = "D" + to_string(compCount++);
+                    newComp = new Diode(name, node1, node2);
+                    break;
+                case PLACE_GROUND:
+                    name = "GND" + to_string(compCount++);
+                    newComp = new Ground(name, node1);
+                    break;
+                default:
+                    break;
+            }
+
+            if (newComp) {
+                saveUndoState(circuit);
+                circuit->addComponent(newComp);
+                cout << "Added " << newComp->getType() << " " << name
+                     << " between nodes " << node1 << " and " << node2 << endl;
+            }
         }
 
         isPlacingComponent = false;
         currentPlacementMode = PLACE_NONE;
     }
-
 }
 
 void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
+    for (const auto& wire : circuit.getWires()) {
+        auto p1 = nodePositions.at(wire.first);
+        auto p2 = nodePositions.at(wire.second);
+        drawWire(renderer, p1.x, p1.y, p2.x, p2.y, currentTheme.text);
+    }
+
+    // Rest of your drawing code...
+    // Draw all components
+    for (const auto& comp : circuit.getComponents()) {
+        comp->render(renderer, nodePositions);
+    }
+
     // Draw all components
     for (const auto& comp : circuit.getComponents()) {
         comp->render(renderer, nodePositions);
@@ -3016,17 +3054,21 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
 
     // Draw placement preview if in placement mode
 
+    // In your drawing code where you handle placement preview:
     if (isPlacingComponent) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
-        SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 128);
-        SDL_RenderDrawLine(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
 
-        // Draw component preview at current position
-        switch(currentPlacementMode) {
-            case PLACE_RESISTOR:
-                drawResistorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-            break;
+        if (currentPlacementMode == PLACE_WIRE) {
+            drawWire(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY, GREEN);
+        } else {
+            // Existing component preview code...
+            switch(currentPlacementMode) {
+                case PLACE_RESISTOR:
+                    drawResistorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                    break;
+                    // ... other component previews ...
+            }
         }
     }
 
@@ -3589,6 +3631,12 @@ int main(int argc, char* argv[]) {
                 if (event.key.keysym.sym == SDLK_ESCAPE && currentPlacementMode != PLACE_NONE) {
                     currentPlacementMode = PLACE_NONE;
                     isPlacingComponent = false;
+                }
+                    // Handle 'W' for wire placement
+                else if (event.key.keysym.sym == SDLK_w) {
+                    currentPlacementMode = PLACE_WIRE;
+                    isPlacingComponent = false; // Will be set to true on first click
+                    cout << "Wire placement mode activated" << endl;
                 }
             }
         }
