@@ -3303,8 +3303,49 @@ void drawComponent(SDL_Renderer* renderer, Component* comp) {
     }
 }
 
+void renderStatus(SDL_Renderer* renderer) {
+    if (currentPlacementMode != PLACE_NONE) {
+        string modeName;
+        switch(currentPlacementMode) {
+            case PLACE_RESISTOR: modeName = "Resistor (R)"; break;
+            case PLACE_CAPACITOR: modeName = "Capacitor (C)"; break;
+            case PLACE_INDUCTOR: modeName = "Inductor (L)"; break;
+            case PLACE_VOLTAGE_SOURCE: modeName = "Voltage Source (V)"; break;
+            case PLACE_CURRENT_SOURCE: modeName = "Current Source (I)"; break;
+            case PLACE_DIODE: modeName = "Diode (Shift+D)"; break;
+            case PLACE_GROUND: modeName = "Ground (Shift+G)"; break;
+            case PLACE_WIRE: modeName = "Wire (W)"; break;
+            default: modeName = "Unknown"; break;
+        }
+
+        string message = "Placing " + modeName + " - Click first connection point";
+        if (isPlacingComponent) {
+            message = "Placing " + modeName + " - Click second connection point (ESC to cancel)";
+        }
+
+        renderText(message, 10, SCREEN_HEIGHT - 30, currentTheme.text);
+    }
+}
+
+void renderShortcutHelp(SDL_Renderer* renderer) {
+    int y = 50;
+    renderText("Keyboard Shortcuts:", 10, y, currentTheme.text); y += 30;
+    renderText("R - Place Resistor", 20, y, currentTheme.text); y += 25;
+    renderText("C - Place Capacitor", 20, y, currentTheme.text); y += 25;
+    renderText("L - Place Inductor", 20, y, currentTheme.text); y += 25;
+    renderText("V - Place Voltage Source", 20, y, currentTheme.text); y += 25;
+    renderText("I - Place Current Source", 20, y, currentTheme.text); y += 25;
+    renderText("Shift+D - Place Diode", 20, y, currentTheme.text); y += 25;
+    renderText("Shift+G - Place Ground", 20, y, currentTheme.text); y += 25;
+    renderText("W - Place Wire", 20, y, currentTheme.text); y += 25;
+    renderText("ESC - Cancel placement", 20, y, currentTheme.text); y += 25;
+}
+
+bool showShortcutHelp = false;
+
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
+    renderStatus(renderer);
 
     string currentCircuitFile = "";
     Circuit* circuit = new Circuit();
@@ -3632,12 +3673,60 @@ int main(int argc, char* argv[]) {
                     currentPlacementMode = PLACE_NONE;
                     isPlacingComponent = false;
                 }
-                    // Handle 'W' for wire placement
-                else if (event.key.keysym.sym == SDLK_w) {
-                    currentPlacementMode = PLACE_WIRE;
-                    isPlacingComponent = false; // Will be set to true on first click
-                    cout << "Wire placement mode activated" << endl;
+                else if (event.key.keysym.sym == SDLK_h) {  // H for help
+                    showShortcutHelp = !showShortcutHelp;
                 }
+                    // Handle 'W' for wire placement
+                else if (event.key.keysym.mod & KMOD_SHIFT) {
+                    // Shift+key combinations for less common components
+                    switch (event.key.keysym.sym) {
+                        case SDLK_d:  // Shift+D for diode
+                            currentPlacementMode = PLACE_DIODE;
+                            isPlacingComponent = false;
+                            cout << "Diode placement mode activated" << endl;
+                            break;
+                        case SDLK_g:  // Shift+G for ground
+                            currentPlacementMode = PLACE_GROUND;
+                            isPlacingComponent = false;
+                            cout << "Ground placement mode activated" << endl;
+                            break;
+                    }
+                } else {
+                    // Regular key combinations for common components
+                    switch (event.key.keysym.sym) {
+                        case SDLK_r:  // R for resistor
+                            currentPlacementMode = PLACE_RESISTOR;
+                            isPlacingComponent = false;
+                            cout << "Resistor placement mode activated" << endl;
+                            break;
+                        case SDLK_c:  // C for capacitor
+                            currentPlacementMode = PLACE_CAPACITOR;
+                            isPlacingComponent = false;
+                            cout << "Capacitor placement mode activated" << endl;
+                            break;
+                        case SDLK_l:  // L for inductor
+                            currentPlacementMode = PLACE_INDUCTOR;
+                            isPlacingComponent = false;
+                            cout << "Inductor placement mode activated" << endl;
+                            break;
+                        case SDLK_v:  // V for voltage source
+                            currentPlacementMode = PLACE_VOLTAGE_SOURCE;
+                            isPlacingComponent = false;
+                            cout << "Voltage source placement mode activated" << endl;
+                            break;
+                        case SDLK_i:  // I for current source
+                            currentPlacementMode = PLACE_CURRENT_SOURCE;
+                            isPlacingComponent = false;
+                            cout << "Current source placement mode activated" << endl;
+                            break;
+                        case SDLK_w:  // W for wire
+                            currentPlacementMode = PLACE_WIRE;
+                            isPlacingComponent = false;
+                            cout << "Wire placement mode activated" << endl;
+                            break;
+                    }
+                }
+
             }
         }
 
@@ -3719,6 +3808,15 @@ int main(int argc, char* argv[]) {
         if (selectedComponent) {
             showComponentProperties(renderer, selectedComponent);
         }
+        if (showShortcutHelp) {
+            SDL_Rect helpBackground = {0, 0, 250, 250};
+            SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 200);
+            SDL_RenderFillRect(renderer, &helpBackground);
+            renderShortcutHelp(renderer);
+        }
+
+// Update screen
+        SDL_RenderPresent(renderer);
 
         // Show placement mode status
         if (currentPlacementMode != PLACE_NONE) {
