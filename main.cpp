@@ -1020,6 +1020,14 @@ void renderTextBox(const TextBox& box) {
     renderText(box.text, box.rect.x + 5, box.rect.y + 5, currentTheme.text);
 }
 
+SDL_Point getNodePosition(int node) {
+    auto it = nodePositions.find(node);
+    if (it != nodePositions.end()) {
+        return it->second;
+    }
+    return {0, 0}; // Default position if node not found
+}
+
 class Resistor : public Component {
 public:
 
@@ -1056,8 +1064,8 @@ public:
     string getType() override { return "Resistor"; }
 
     void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
-        SDL_Point p1 = nodePositions.at(node1);
-        SDL_Point p2 = nodePositions.at(node2);
+        SDL_Point p1 = getNodePosition(node1);
+        SDL_Point p2 = getNodePosition(node2);
 
         const int segments = 5;
         const int amplitude = 10;
@@ -1091,16 +1099,16 @@ public:
         renderText(name, midX, midY, currentTheme.text);
     }
 
-    SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const override {
-        SDL_Point p1 = nodePositions.at(node1);
-        SDL_Point p2 = nodePositions.at(node2);
+
+    SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
+        SDL_Point p1 = getNodePosition(node1);
+        SDL_Point p2 = getNodePosition(node2);
 
         SDL_Rect rect;
         rect.x = min(p1.x, p2.x) - 15;
         rect.y = min(p1.y, p2.y) - 15;
         rect.w = abs(p1.x - p2.x) + 30;
         rect.h = abs(p1.y - p2.y) + 30;
-
         return rect;
     }
 };
@@ -3007,10 +3015,10 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
     }
 
     // Draw placement preview if in placement mode
+
     if (isPlacingComponent) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
-
         SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 128);
         SDL_RenderDrawLine(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
 
@@ -3023,11 +3031,12 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
     }
 
     for (const auto& node : circuit.getNodeMap()) {
+
         SDL_Point pos = nodePositions[node.second];
         SDL_Rect nodeRect = {pos.x - 5, pos.y - 5, 10, 10};
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
         SDL_RenderFillRect(renderer, &nodeRect);
-        renderText(node.first, pos.x + 10, pos.y - 10, BLACK);
+       // renderText(node.first, pos.x + 10, pos.y - 10, BLACK);   runTime error
     }
 }
 
