@@ -1091,7 +1091,7 @@ public:
         renderText(name, midX, midY, currentTheme.text);
     }
 
-    SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
+    SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const override {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
@@ -2887,18 +2887,21 @@ void drawVoltageSource(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, c
 }
 
 int findOrCreateNodeAt(int x, int y) {
-    // First check if we're near an existing node
+    // First check if we're near an existing node (with some threshold)
+    const int NODE_PROXIMITY_THRESHOLD = 15; // pixels
+
     for (const auto& node : nodePositions) {
         int dx = x - node.second.x;
         int dy = y - node.second.y;
-        if (dx*dx + dy*dy < 100) { // 10px radius
+        if (dx*dx + dy*dy < NODE_PROXIMITY_THRESHOLD*NODE_PROXIMITY_THRESHOLD) {
             return node.first;
         }
     }
 
-    // If not, create a new node
+    // If not near any existing node, create a new one
     int newNode = nextNodeNumber++;
     nodePositions[newNode] = {x, y};
+    reverseNodeMap[newNode] = to_string(newNode);
     return newNode;
 }
 
@@ -2931,7 +2934,7 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
         Component* newComp = nullptr;
         double defaultValue = 0.0;
 
-        // Find or create nodes
+        // Find or create nodes at both positions
         int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
         int node2 = findOrCreateNodeAt(x, y);
 
@@ -2976,12 +2979,14 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
         if (newComp) {
             saveUndoState(circuit);
             circuit->addComponent(newComp);
+            cout << "Added " << newComp->getType() << " " << name
+                 << " between nodes " << node1 << " and " << node2 << endl;
         }
 
-        // Reset placement state
         isPlacingComponent = false;
         currentPlacementMode = PLACE_NONE;
     }
+
 }
 
 void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
@@ -3267,7 +3272,11 @@ int main(int argc, char* argv[]) {
     bool SaveAsDialog = false;
 
     // Initialize node positions with ground node
-    nodePositions[0] = {100, 500}; // Ground at bottom
+// In main(), before the main loop:
+// Initialize node positions with ground node
+    nodePositions[0] = {100, 500};
+    reverseNodeMap[0] = "GND";
+    nextNodeNumber = 1; // Start numbering regular nodes from 1
 
     while (running) {
         if (undoStack.empty()) {
