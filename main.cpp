@@ -110,100 +110,6 @@ unordered_map<string, int> nodeMap;
 unordered_map<int, string> reverseNodeMap;
 int nextNodeNumber = 1;
 
-SDL_Window* window = nullptr;
-SDL_Renderer* renderer = nullptr;
-const int SCREEN_WIDTH = 1280;
-const int SCREEN_HEIGHT = 720;
-
-const SDL_Color WHITE = {255, 255, 255, 255};
-const SDL_Color BLACK = {0, 0, 0, 255};
-const SDL_Color RED = {220, 0, 0, 255};
-const SDL_Color GREEN = {0, 200, 0, 255};
-const SDL_Color BLUE = {0, 0, 220, 255};
-const SDL_Color currentThemebutton = {200, 200, 200, 255};
-
-TTF_Font* font = nullptr;
-
-struct Button {
-    SDL_Rect rect;
-    string text;
-    SDL_Color color;
-    bool isActive;
-};
-
-struct TextBox {
-    SDL_Rect rect;
-    string text;
-    bool isActive;
-};
-
-SDL_Rect circuitArea = {50, 50, 800, 600};
-SDL_Rect plotArea = {850, 50, 380, 600};
-SDL_Rect fileMenuRect = {10, 45, 140, 250};
-SDL_Rect editMenuRect = {100, 45, 140, 250};
-
-TextBox node1Box = {{10, SCREEN_HEIGHT - 60, 100, 40}, "Node1", false};
-TextBox node2Box = {{120, SCREEN_HEIGHT - 60, 100, 40}, "Node2", false};
-TextBox valueBox = {{230, SCREEN_HEIGHT - 60, 100, 40}, "Value", false};
-TextBox nameBox = {{300, 210, 180, 30}, "Name", false};
-
-bool darkMode = false;
-
-struct ThemeColors {
-    SDL_Color background;
-    SDL_Color text;
-    SDL_Color circuitBg;
-    SDL_Color plotBg;
-    SDL_Color button;
-    SDL_Color buttonText;
-    SDL_Color toolbar;
-};
-
-ThemeColors lightTheme = {
-        {240, 240, 240, 255},  // background
-        {0, 0, 0, 255},         // text
-        {255, 255, 255, 255},   // circuitBg
-        {255, 255, 255, 255},   // plotBg
-        {200, 200, 200, 255},   // button
-        {0, 0, 0, 255},         // buttonText
-        {180, 180, 180, 255}    // toolbar
-};
-
-ThemeColors darkTheme = {
-        {40, 40, 40, 255},      // background
-        {220, 220, 220, 255},   // text
-        {60, 60, 60, 255},      // circuitBg
-        {60, 60, 60, 255},      // plotBg
-        {80, 80, 80, 255},      // button
-        {220, 220, 220, 255},   // buttonText
-        {50, 50, 50, 255}       // toolbar
-};
-
-ThemeColors currentTheme = lightTheme;
-
-bool showPassives = false;
-bool showSources = false;
-bool showSemis = false;
-bool showDependents = false;
-
-Button darkModeBtn = {460, 5, 100, 30, "Dark Mode", currentTheme.button};
-Button passiveBtn = {870, 50, 120, 40, "Passives", currentTheme.button};
-Button sourcesBtn = {870, 100, 120, 40, "Sources", currentTheme.button};
-Button semiBtn = {870, 150, 120, 40, "Semiconductors", currentTheme.button};
-Button depBtn = {870, 200, 120, 40, "Dependent", currentTheme.button};
-
-Button resBtn = {870, 100, 120, 40, "Resistor", currentTheme.button};
-Button capBtn = {870, 150, 120, 40, "Capacitor", currentTheme.button};
-Button indBtn = {870, 200, 120, 40, "Inductor", currentTheme.button};
-Button diodeBtn = {870, 250, 120, 40, "Diode", currentTheme.button};
-Button vSrcBtn = {1000, 100, 120, 40, "V Source", currentTheme.button};
-Button iSrcBtn = {1000, 150, 120, 40, "I Source", currentTheme.button};
-Button gndBtn = {1000, 200, 120, 40, "Ground", currentTheme.button};
-Button vcvsBtn = {1000, 250, 120, 40, "VCVS", currentTheme.button};
-Button vccsBtn = {1000, 300, 120, 40, "VCCS", currentTheme.button};
-Button ccvsBtn = {1000, 350, 120, 40, "CCVS", currentTheme.button};
-Button cccsBtn = {1000, 400, 120, 40, "CCCS", currentTheme.button};
-
 int getOrCreateNode(const string& nodeName) {
     if (nodeName == "GND" || nodeName == "0") return 0;
 
@@ -278,158 +184,12 @@ double parseSpiceValue(const string& valStr) {
     return num;
 }
 
-class Component;
-
-class Port {
-public:
-    SDL_Rect rect;
-    bool isInput;
-    Component* parentComponent;
-    int nodeNumber;
-
-    Port(bool input, Component* parent, int node)
-        : isInput(input), parentComponent(parent), nodeNumber(node) {
-        rect = {0, 0, 10, 10};
-    }
-};
-
-class Node {
-public:
-    int number;
-    string name;
-    SDL_Point position;
-    vector<Port*> connectedPorts;
-
-    Node(int num, const string& nm, int x, int y)
-            : number(num), name(nm), position({x,y}) {}
-};
-
-class Wire {
-public:
-    Port* startPort = nullptr;
-    Port* endPort = nullptr;
-    vector<SDL_Point> segments;
-    bool isSelected = false;
-
-    void draw(SDL_Renderer* renderer) {
-        if (!startPort) return;
-
-        SDL_SetRenderDrawColor(renderer, isSelected ? 255 : 128, 0, 128, 255);
-
-        SDL_Point prev = {
-            startPort->rect.x + startPort->rect.w/2,
-            startPort->rect.y + startPort->rect.h/2
-        };
-
-        for (auto& point : segments) {
-            SDL_RenderDrawLine(renderer, prev.x, prev.y, point.x, point.y);
-            prev = point;
-        }
-
-        if (endPort) {
-            SDL_RenderDrawLine(renderer,
-                prev.x, prev.y,
-                endPort->rect.x + endPort->rect.w/2,
-                endPort->rect.y + endPort->rect.h/2);
-        }
-    }
-
-    void addSegment(int x, int y) {
-        segments.push_back({x, y});
-    }
-};
-
 class Component {
 
 protected:
     int posX, posY;
-    vector<Port*> inputPorts;
-    vector<Port*> outputPorts;
-    int width = 40;
-    int height = 40;
-    SDL_Rect rect;
-    vector<Port*> ports;
-    SDL_Color color;
-    bool isDragging = false;
-
 public:
-    SDL_Point position;
-    bool isSelected = false;
-    SDL_Point dragOffset = {0, 0};
 
-    virtual ~Component() {
-        // Clean up ports
-        for (auto port : inputPorts) delete port;
-        for (auto port : outputPorts) delete port;
-    }
-
-    virtual vector<Port*> getPorts() {
-        vector<Port*> allPorts = inputPorts;
-        allPorts.insert(allPorts.end(), outputPorts.begin(), outputPorts.end());
-        return allPorts;
-    }
-
-    virtual void draw(SDL_Renderer* renderer) {
-        // Draw component body
-        SDL_Color color = SDL_Color{200, 200, 0, 255};
-
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
-        SDL_RenderFillRect(renderer, &rect);
-
-        // Draw component name
-        SDL_Color textColor = {255, 255, 255, 255};
-        SDL_Surface* surface = TTF_RenderText_Solid(TTF_OpenFont("C:\\Windows\\Fonts\\consola.ttf", 16),
-                                                   name.c_str(), textColor);
-        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-        SDL_Rect textRect = {rect.x + 5, rect.y + 5, surface->w, surface->h};
-        SDL_RenderCopy(renderer, texture, nullptr, &textRect);
-        SDL_FreeSurface(surface);
-        SDL_DestroyTexture(texture);
-
-        // Draw ports
-        for (auto port : ports) {
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            SDL_RenderFillRect(renderer, &port->rect);
-        }
-    }
-
-    virtual void setPosition(int x, int y) {
-        position = {x, y};
-        updatePortPositions();
-    }
-
-    virtual void updatePortPositions() {
-        // Update port positions based on component position
-        for (size_t i = 0; i < ports.size(); i++) {
-            if (i == 0) { // Input port
-                ports[i]->rect.x = position.x - 5;
-                ports[i]->rect.y = position.y + height/2;
-            } else { // Output port
-                ports[i]->rect.x = position.x + width + 5;
-                ports[i]->rect.y = position.y + height/2;
-            }
-        }
-    }
-
-    virtual void addPort(bool isInput, int nodeNumber) {
-        ports.push_back(new Port(isInput, this, nodeNumber));
-        updatePortPositions();
-    }
-
-    virtual bool containsPoint(int x, int y) const {
-        return (x >= position.x && x <= position.x + width &&
-                y >= position.y && y <= position.y + height);
-    }
-
-    void addInputPort(int nodeNumber) {
-        inputPorts.push_back(new Port(true, this, nodeNumber));
-        updatePortPositions();
-    }
-
-    void addOutputPort(int nodeNumber) {
-        outputPorts.push_back(new Port(false, this, nodeNumber));
-        updatePortPositions();
-    }
 
     ComponentType type;
     string name;
@@ -441,7 +201,7 @@ public:
     Component(ComponentType t, const string& n, int n1, int n2, double val)
             : type(t), name(n), node1(n1), node2(n2), value(val) {}
 
-
+    virtual ~Component() {}
 
     virtual void stamp(vector<vector<double>>& G,
                        vector<vector<double>>& B,
@@ -472,6 +232,9 @@ public:
             case CCCS_SOURCE: typeStr = "CCCS Source"; break;
         }
         return typeStr + " " + name + " " + getNodeName(node1) + " " + getNodeName(node2) + " " + to_string(value);
+    }    virtual void setPosition(int x, int y) {
+        posX = x;
+        posY = y;
     }
     virtual std::pair<int,int> getPosition() {
         return {posX, posY};
@@ -482,145 +245,15 @@ public:
 };
 
 class Circuit {
-    vector<vector<double>> G;
-    vector<vector<double>> B;
-    vector<vector<double>> C;
-    vector<vector<double>> D;
-    vector<double> J;
-    vector<double> E;
-
     vector<Component*> components;
-    int nextVariable;
     int maxNode;
     static double currentTimeStep;
     static double currentTime;
-    std::map<std::string, int> nodeMap;
-    std::map<int, std::string> reverseNodeMap;
-    int nextNodeNumber = 1;
-    vector<Wire*> wires;
-    map<int, Node*> nodes;
+    std::map<std::string, int> nodeMap;          // Maps node names to numbers
+    std::map<int, std::string> reverseNodeMap;   // Maps node numbers to names
+    int nextNodeNumber = 1;                      // Next available node number
 
 public:
-
-    void stampMatrix() {
-        // Clear matrices
-        G.clear(); B.clear(); C.clear(); D.clear();
-        J.clear(); E.clear();
-
-        // Initialize based on node count
-        int maxNode = 0;
-        for (const auto& node : nodes) {
-            if (node.first > maxNode) maxNode = node.first;
-        }
-        int numNodes = maxNode;
-
-        // Count voltage sources
-        int numVSources = 0;
-        for (auto comp : components) {
-            if (comp->type == VOLTAGE_SOURCE ||
-                comp->type == SIN_VOLTAGE_SOURCE ||
-                comp->type == PULSE_VOLTAGE_SOURCE) {
-                numVSources++;
-            }
-        }
-
-        // Resize matrices
-        G.resize(numNodes, vector<double>(numNodes, 0.0));
-        B.resize(numNodes, vector<double>(numVSources, 0.0));
-        C.resize(numVSources, vector<double>(numNodes, 0.0));
-        D.resize(numVSources, vector<double>(numVSources, 0.0));
-        J.resize(numNodes, 0.0);
-        E.resize(numVSources, 0.0);
-
-        // Stamp components
-        int vsCount = 0;
-        for (auto comp : components) {
-            comp->stamp(G, B, C, D, J, E, vsCount);
-        }
-
-        // Handle wire connections by merging nodes
-        for (auto wire : wires) {
-            int node1 = wire->startPort->nodeNumber;
-            int node2 = wire->endPort->nodeNumber;
-
-            if (node1 != node2 && node1 > 0 && node2 > 0) {  // Skip ground node (0)
-                // Adjust for 0-based indexing
-                int row1 = node1 - 1;
-                int row2 = node2 - 1;
-
-                // Merge node2 into node1
-                for (int i = 0; i < numNodes; i++) {
-                    G[row1][i] += G[row2][i];
-                    G[i][row1] += G[i][row2];
-                    // Clear merged node
-                    G[row2][i] = 0;
-                    G[i][row2] = 0;
-                }
-
-                // Update all ports connected to node2
-                for (auto comp : components) {
-                    for (auto port : comp->getPorts()) {
-                        if (port->nodeNumber == node2) {
-                            port->nodeNumber = node1;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    void clear() {
-        for (auto comp : components) delete comp;
-        for (auto wire : wires) delete wire;
-        components.clear();
-        wires.clear();
-        nodeMap.clear();
-        reverseNodeMap.clear();
-        nextNodeNumber = 1;
-    }
-
-    void addWire(Wire* wire) {
-        wires.push_back(wire);
-    }
-
-    const vector<Wire*>& getWires() const {
-        return wires;
-    }
-
-    void addWire(Port* start, Port* end) {
-        // Ensure ports aren't already connected
-        for (auto wire : wires) {
-            if ((wire->startPort == start && wire->endPort == end) ||
-                (wire->startPort == end && wire->endPort == start)) {
-                return;
-            }
-        }
-
-        wires.push_back(new Wire());
-
-        // Update node connections
-        if (start->isInput && !end->isInput) {
-            // Output to input connection
-            connectNodes(end->nodeNumber, start->nodeNumber);
-        } else if (!start->isInput && end->isInput) {
-            // Input to output connection
-            connectNodes(start->nodeNumber, end->nodeNumber);
-        }
-    }
-
-    void connectNodes(int node1, int node2) {
-        // Merge node2 into node1
-        Node* primary = nodes[node1];
-        Node* secondary = nodes[node2];
-
-        for (auto port : secondary->connectedPorts) {
-            port->nodeNumber = node1;
-            primary->connectedPorts.push_back(port);
-        }
-
-        nodes.erase(node2);
-        delete secondary;
-    }
     Circuit() : maxNode(0) {}
 
     ~Circuit() {
@@ -1201,7 +834,6 @@ public:
 double Circuit::currentTimeStep = 0.0;
 double Circuit::currentTime = 0.0;
 Component* selectedComponent = nullptr;
-Wire* currentWire = nullptr;
 
 bool saveCircuitToFile(const Circuit& circuit, const string& filename) {
     string actualFilename = filename;
@@ -1981,6 +1613,101 @@ void resetGlobalState() {
     showCurrent = false;
 }
 
+SDL_Window* window = nullptr;
+SDL_Renderer* renderer = nullptr;
+const int SCREEN_WIDTH = 1280;
+const int SCREEN_HEIGHT = 720;
+
+const SDL_Color WHITE = {255, 255, 255, 255};
+const SDL_Color BLACK = {0, 0, 0, 255};
+const SDL_Color RED = {220, 0, 0, 255};
+const SDL_Color GREEN = {0, 200, 0, 255};
+const SDL_Color BLUE = {0, 0, 220, 255};
+const SDL_Color currentThemebutton = {200, 200, 200, 255};
+
+TTF_Font* font = nullptr;
+
+struct Button {
+    SDL_Rect rect;
+    string text;
+    SDL_Color color;
+    bool isActive;
+};
+
+struct TextBox {
+    SDL_Rect rect;
+    string text;
+    bool isActive;
+};
+
+SDL_Rect circuitArea = {50, 50, 800, 600};
+SDL_Rect plotArea = {850, 50, 380, 600};
+SDL_Rect fileMenuRect = {10, 45, 140, 250};
+SDL_Rect editMenuRect = {100, 45, 140, 250};
+
+TextBox node1Box = {{10, SCREEN_HEIGHT - 60, 100, 40}, "Node1", false};
+TextBox node2Box = {{120, SCREEN_HEIGHT - 60, 100, 40}, "Node2", false};
+TextBox valueBox = {{230, SCREEN_HEIGHT - 60, 100, 40}, "Value", false};
+TextBox nameBox = {{300, 210, 180, 30}, "Name", false};
+
+bool darkMode = false;
+
+struct ThemeColors {
+    SDL_Color background;
+    SDL_Color text;
+    SDL_Color circuitBg;
+    SDL_Color plotBg;
+    SDL_Color button;
+    SDL_Color buttonText;
+    SDL_Color toolbar;
+};
+
+ThemeColors lightTheme = {
+        {240, 240, 240, 255},  // background
+        {0, 0, 0, 255},         // text
+        {255, 255, 255, 255},   // circuitBg
+        {255, 255, 255, 255},   // plotBg
+        {200, 200, 200, 255},   // button
+        {0, 0, 0, 255},         // buttonText
+        {180, 180, 180, 255}    // toolbar
+};
+
+ThemeColors darkTheme = {
+        {40, 40, 40, 255},      // background
+        {220, 220, 220, 255},   // text
+        {60, 60, 60, 255},      // circuitBg
+        {60, 60, 60, 255},      // plotBg
+        {80, 80, 80, 255},      // button
+        {220, 220, 220, 255},   // buttonText
+        {50, 50, 50, 255}       // toolbar
+};
+
+ThemeColors currentTheme = lightTheme;
+
+bool showPassives = false;
+bool showSources = false;
+bool showSemis = false;
+bool showDependents = false;
+
+Button darkModeBtn = {460, 5, 100, 30, "Dark Mode", currentTheme.button};
+Button passiveBtn = {870, 50, 120, 40, "Passives", currentTheme.button};
+Button sourcesBtn = {870, 100, 120, 40, "Sources", currentTheme.button};
+Button semiBtn = {870, 150, 120, 40, "Semiconductors", currentTheme.button};
+Button depBtn = {870, 200, 120, 40, "Dependent", currentTheme.button};
+
+Button resBtn = {870, 100, 120, 40, "Resistor", currentTheme.button};
+Button capBtn = {870, 150, 120, 40, "Capacitor", currentTheme.button};
+Button indBtn = {870, 200, 120, 40, "Inductor", currentTheme.button};
+Button diodeBtn = {870, 250, 120, 40, "Diode", currentTheme.button};
+Button vSrcBtn = {1000, 100, 120, 40, "V Source", currentTheme.button};
+Button iSrcBtn = {1000, 150, 120, 40, "I Source", currentTheme.button};
+Button gndBtn = {1000, 200, 120, 40, "Ground", currentTheme.button};
+Button vcvsBtn = {1000, 250, 120, 40, "VCVS", currentTheme.button};
+Button vccsBtn = {1000, 300, 120, 40, "VCCS", currentTheme.button};
+Button ccvsBtn = {1000, 350, 120, 40, "CCVS", currentTheme.button};
+Button cccsBtn = {1000, 400, 120, 40, "CCCS", currentTheme.button};
+
+
 bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
@@ -2199,19 +1926,19 @@ void drawVoltageSource(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, c
     renderText(name, centerX, centerY + radius + 15, BLACK);
 }
 
-void drawCircuit(Circuit* circuit, SDL_Renderer* renderer, Wire* currentWire) {
+void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
     std::map<int, SDL_Point> nodePositions;
     int yLevel = 100;
     int xSpacing = 100;
 
-    calculateNodePositions(*circuit);
+    calculateNodePositions(circuit);
 
-    for (const auto& node : circuit->getNodeMap()) {
+    for (const auto& node : circuit.getNodeMap()) {
         int x = 100 + node.second * xSpacing;
         nodePositions[node.second] = {x, yLevel};
     }
 
-    for (const auto& comp : circuit->getComponents()) {
+    for (const auto& comp : circuit.getComponents()) {
         SDL_Point p1 = nodePositions[comp->node1];
         SDL_Point p2 = nodePositions[comp->node2];
 
@@ -2239,39 +1966,9 @@ void drawCircuit(Circuit* circuit, SDL_Renderer* renderer, Wire* currentWire) {
             default:
                 renderText(comp->name, (p1.x + p2.x)/2, (p1.y + p2.y)/2, BLACK);
         }
-
-        if (comp->isSelected) {
-            for (auto port : comp->getPorts()) {
-                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-                SDL_RenderFillRect(renderer, &port->rect);
-            }
-        }
     }
 
-    // Draw all wires
-    for (auto wire : circuit->getWires()) {
-        wire->draw(renderer);
-    }
-
-    // Draw current wire being created (if in wiring mode)
-    if (currentWire) {
-        currentWire->draw(renderer);
-
-        // Draw preview to mouse cursor
-        int x, y;
-        SDL_GetMouseState(&x, &y);
-        SDL_SetRenderDrawColor(renderer, 200, 200, 200, 128);
-        SDL_RenderDrawLine(renderer,
-            currentWire->segments.empty() ?
-                currentWire->startPort->rect.x + currentWire->startPort->rect.w/2 :
-                currentWire->segments.back().x,
-            currentWire->segments.empty() ?
-                currentWire->startPort->rect.y + currentWire->startPort->rect.h/2 :
-                currentWire->segments.back().y,
-            x, y);
-    }
-
-    for (const auto& node : circuit->getNodeMap()) {
+    for (const auto& node : circuit.getNodeMap()) {
         SDL_Point pos = nodePositions[node.second];
         SDL_Rect nodeRect = {pos.x - 5, pos.y - 5, 10, 10};
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
@@ -2319,47 +2016,6 @@ AppState currentState = MAIN_VIEW;
 vector<Circuit*> undoStack;
 vector<Circuit*> redoStack;
 string copiedComponent;
-
-void loadCircuitFromFile(Circuit* circuit, const string& filename) {
-    ifstream file(filename);
-    if (!file.is_open()) {
-        cerr << "Error: Could not open file " << filename << endl;
-        return;
-    }
-
-    // Clear existing circuit
-    circuit->clear();
-
-    string line;
-    while (getline(file, line)) {
-        istringstream iss(line);
-        string type, name, node1, node2, value;
-        iss >> type >> name >> node1 >> node2 >> value;
-
-        // Create component based on type
-        Component* comp = nullptr;
-        if (type == "R") {
-            comp = new Resistor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(value));
-        }
-        else if (type == "C") {
-            comp = new Capacitor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(value));
-        }
-        // Add other component types similarly...
-
-        if (comp) {
-            // Set position from file or random if not specified
-            int x, y;
-            if (iss >> x >> y) {
-                comp->setPosition(x, y);
-            } else {
-                comp->setPosition(rand() % circuitArea.w + circuitArea.x,
-                                 rand() % circuitArea.h + circuitArea.y);
-            }
-            circuit->addComponent(comp);
-        }
-    }
-    file.close();
-}
 
 void saveUndoState(Circuit*& currentCircuit) {
     // Clear redo stack when making new changes
@@ -2812,65 +2468,6 @@ void drawComponent(SDL_Renderer* renderer, Component* comp) {
     }
 }
 
-void renderCircuit(SDL_Renderer* renderer, const vector<Component*>& components,
-                   const vector<Wire*>& wires, const map<int, Node*>& nodes) {
-    // Draw components
-    for (auto comp : components) {
-        comp->draw(renderer);
-
-        // Draw ports
-        for (auto port : comp->getPorts()) {
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            SDL_RenderFillRect(renderer, &port->rect);
-        }
-    }
-
-    // Draw wires
-    for (auto wire : wires) {
-        wire->draw(renderer);
-    }
-
-    // Draw nodes
-    for (auto& node : nodes) {
-        SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
-        SDL_Rect nodeRect = {node.second->position.x - 5,
-                             node.second->position.y - 5,
-                             10, 10};
-        SDL_RenderFillRect(renderer, &nodeRect);
-    }
-}
-void handleMouseClick(int x, int y, vector<Component*>& components,
-                      Port*& currentlyConnectingPort, Circuit* circuit) {
-    // Check for port clicks
-    Port* clickedPort = nullptr;
-    for (auto comp : components) {
-        for (auto port : comp->getPorts()) {
-            if (x >= port->rect.x && x <= port->rect.x + port->rect.w &&
-                y >= port->rect.y && y <= port->rect.y + port->rect.h) {
-                clickedPort = port;
-                break;
-            }
-        }
-        if (clickedPort) break;
-    }
-
-    if (clickedPort) {
-        if (currentlyConnectingPort) {
-            // Complete the connection
-            if (currentlyConnectingPort != clickedPort &&
-                currentlyConnectingPort->isInput != clickedPort->isInput) {
-                circuit->addWire(currentlyConnectingPort, clickedPort);
-            }
-            currentlyConnectingPort = nullptr;
-        } else {
-            // Start new connection
-            currentlyConnectingPort = clickedPort;
-        }
-    } else {
-        // Handle other clicks (component selection, etc.)
-        currentlyConnectingPort = nullptr;
-    }
-}
 
 // not used //
 
@@ -2925,7 +2522,7 @@ void handleProbe(int x, int y, const Circuit& circuit) {
 }
 
 void renderMainView(SDL_Renderer* renderer, Circuit& circuit) {
-    drawCircuit(&circuit, renderer, currentWire);
+    drawCircuit(circuit, renderer);
 
     if (selectedComponent) {
         showComponentProperties(renderer, selectedComponent);
@@ -3019,6 +2616,18 @@ void showAddComponentDialog(SDL_Renderer* renderer, Circuit& circuit) {
     Button cancelBtn = {dialogRect.x + 220, dialogRect.y + 380, 100, 30, "Cancel", RED};
     renderButton(addBtn);
     renderButton(cancelBtn);
+}
+
+void renderCircuit(SDL_Renderer* renderer, Circuit& circuit, TTF_Font* font) {
+    for (auto comp : circuit.getComponents()) {
+        drawComponent(renderer, comp);
+
+        std::pair<int, int> pos = comp->getPosition();
+        int x = pos.first;
+        int y = pos.second;
+
+
+    }
 }
 
 void addComponentAtPosition(Circuit& circuit, int x, int y) {
@@ -3141,6 +2750,7 @@ void showResultsWindow(SDL_Renderer* renderer, const vector<double>& voltages,
 
 // not uses //
 
+
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
 
@@ -3179,90 +2789,23 @@ int main(int argc, char* argv[]) {
                     darkMode = !darkMode;
                     currentTheme = darkMode ? darkTheme : lightTheme;
                     darkModeBtn.text = darkMode ? "Light Mode" : "Dark Mode";
-                    }
-
-                bool isWiringMode = false;
-                currentWire = nullptr;
-                Component* draggedComponent = nullptr;
-
-                // In your event loop:
-                if (event.type == SDL_MOUSEBUTTONDOWN) {
-                    int x, y;
-                    SDL_GetMouseState(&x, &y);
-
-                    if (!isWiringMode) {
-                        // Component selection mode
-                        for (auto comp : circuit->getComponents()) {
-                            if (comp->containsPoint(x, y)) {
-                                // Deselect all other components
-                                for (auto other : circuit->getComponents()) {
-                                    other->isSelected = false;
-                                }
-                                comp->isSelected = true;
-                                draggedComponent = comp;
-                                comp->dragOffset = {x - comp->position.x, y - comp->position.y};
-                                break;
-                            }
-                        }
-                    } else {
-                        // Wiring mode
-                        for (auto comp : circuit->getComponents()) {
-                            for (auto port : comp->getPorts()) {
-                                if (x >= port->rect.x && x <= port->rect.x + port->rect.w &&
-                                    y >= port->rect.y && y <= port->rect.y + port->rect.h) {
-
-                                    if (!currentWire) {
-                                        currentWire = new Wire();
-                                        currentWire->startPort = port;
-                                    } else if (currentWire->startPort != port) {
-                                        currentWire->endPort = port;
-                                        circuit->addWire(currentWire);
-                                        currentWire = nullptr;
-                                    }
-                                    break;
-                                    }
-                            }
-                        }
-                    }
-                }
-                else if (event.type == SDL_MOUSEMOTION && draggedComponent) {
-                    int x, y;
-                    SDL_GetMouseState(&x, &y);
-                    draggedComponent->setPosition(x - draggedComponent->dragOffset.x,
-                                                 y - draggedComponent->dragOffset.y);
-                }
-                else if (event.type == SDL_MOUSEBUTTONUP) {
-                    draggedComponent = nullptr;
-                }
-                else if (event.type == SDL_KEYDOWN) {
-                    if (event.key.keysym.sym == SDLK_w) {
-                        isWiringMode = !isWiringMode;
-                        if (!isWiringMode && currentWire) {
-                            delete currentWire;
-                            currentWire = nullptr;
-                        }
-                    }
-                    else if (isWiringMode && currentWire && event.key.keysym.sym == SDLK_SPACE) {
-                        int x, y;
-                        SDL_GetMouseState(&x, &y);
-                        currentWire->addSegment(x, y);
-                    }
                 }
 
-                if (y <= 40) {
-                    if (x >= 10 && x <= 90) {
+                // Handle toolbar buttons
+                else if (y <= 40) {
+                    if (x >= 10 && x <= 90) { // File button
                         FileMenu = !FileMenu;
                         EditMenu = false;
                         ComponentLibrary = false;
                         AnalysisSettings = false;
                     }
-                    else if (x >= 100 && x <= 180) {
+                    else if (x >= 100 && x <= 180) { // Components button
                         EditMenu = !EditMenu;
                         ComponentLibrary = false;
                         FileMenu = false;
                         AnalysisSettings = false;
                     }
-                    else if (x >= 280 && x <= 360) {
+                    else if (x >= 280 && x <= 360) { // Analyze button
                         AnalysisSettings = !AnalysisSettings;
                         FileMenu = false;
                         EditMenu = false;
@@ -3471,31 +3014,29 @@ int main(int argc, char* argv[]) {
                     handleComponentPlacement(circuit, x, y);
                 }
 
+                // Handle file dialog
                 if (FileDialog) {
-                    showFileDialog(renderer, txtFiles);
-
-                    // Handle file selection
-                    if (event.type == SDL_MOUSEBUTTONDOWN) {
-                        int x, y;
-                        SDL_GetMouseState(&x, &y);
-
-                        SDL_Rect dialog = {200, 150, 400, 400};
-                        if (x >= dialog.x + 100 && x <= dialog.x + 200 &&
-                            y >= dialog.y + 330 && y <= dialog.y + 370) { // Open button
-
-                            // Find which file was clicked
-                            for (size_t i = 0; i < txtFiles.size(); i++) {
-                                SDL_Rect fileRect = {dialog.x + 20, dialog.y + 60 + (int)i * 30, 360, 25};
-                                if (x >= fileRect.x && x <= fileRect.x + fileRect.w &&
-                                    y >= fileRect.y && y <= fileRect.y + fileRect.h) {
-
-                                    loadCircuitFromFile(circuit, txtFiles[i]);
-                                    currentCircuitFile = txtFiles[i];
-                                    FileDialog = false;
-                                    break;
-                                    }
+                    SDL_Rect dialog = {200, 150, 400, 400};
+                    if (x >= dialog.x + 100 && x <= dialog.x + 200 &&
+                        y >= dialog.y + 330 && y <= dialog.y + 370) { // Open
+                        // Find which file was clicked
+                        for (size_t i = 0; i < txtFiles.size(); i++) {
+                            SDL_Rect fileRect = {dialog.x + 20, dialog.y + 60 + (int)i * 30, 360, 25};
+                            if (x >= fileRect.x && x <= fileRect.x + fileRect.w &&
+                                y >= fileRect.y && y <= fileRect.y + fileRect.h) {
+                                resetGlobalState();
+                                delete circuit;
+                                circuit = new Circuit();
+                                processCircuitFile(txtFiles[i], *circuit);
+                                currentCircuitFile = txtFiles[i];
+                                FileDialog = false;
+                                break;
                             }
-                            }
+                        }
+                    }
+                    else if (x >= dialog.x + 220 && x <= dialog.x + 320 &&
+                             y >= dialog.y + 330 && y <= dialog.y + 370) { // Cancel
+                        FileDialog = false;
                     }
                 }
 
@@ -3594,7 +3135,7 @@ int main(int argc, char* argv[]) {
         // Draw the circuit
         if (circuit) {
             calculateNodePositions(*circuit);
-            drawCircuit(circuit, renderer, currentWire);
+            drawCircuit(*circuit, renderer);
         }
 
         // Draw plots if we have data
