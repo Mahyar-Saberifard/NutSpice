@@ -13,6 +13,8 @@
 #include <direct.h>
 #include <SDL2/SDL2_gfx.h>
 #include <SDL2/SDL_ttf.h>
+#include <unordered_set>
+#include <unordered_map>
 
 using namespace std;
 
@@ -25,6 +27,24 @@ using namespace std;
 #define CHDIR chdir
 #define MAX_PATH PATH_MAX
 #endif
+
+
+
+struct PlotSignal {
+    vector<double> time;
+    vector<double> values;
+    string name;
+    SDL_Color color;
+};
+
+vector<PlotSignal> plotSignals;
+int selectedSignalIndex = -1;
+bool showGrid = true;
+bool showLegend = true;
+double timeZoom = 1.0;
+double valueZoom = 1.0;
+double timePan = 0.0;
+double valuePan = 0.0;
 
 vector<string> listTxtFiles(const string& directory) {
     vector<string> files;
@@ -182,6 +202,8 @@ Button vcvsBtn = {1000, 250, 120, 40, "VCVS", currentTheme.button};
 Button vccsBtn = {1000, 300, 120, 40, "VCCS", currentTheme.button};
 Button ccvsBtn = {1000, 350, 120, 40, "CCVS", currentTheme.button};
 Button cccsBtn = {1000, 400, 120, 40, "CCCS", currentTheme.button};
+Button voltageBtn = {plotArea.x + 10, plotArea.y + 10, 100, 30, "Voltage", currentTheme.button};
+Button currentBtn = {plotArea.x + 120, plotArea.y + 10, 100, 30, "Current", currentTheme.button};
 
 enum ComponentType {
     RESISTOR,
@@ -365,6 +387,8 @@ public:
     virtual void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const = 0;
     virtual SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const = 0;
 
+
+
 };
 
 class Circuit {
@@ -372,13 +396,16 @@ class Circuit {
     int maxNode;
     static double currentTimeStep;
     static double currentTime;
-    std::map<std::string, int> nodeMap;          // Maps node names to numbers
-    std::map<int, std::string> reverseNodeMap;   // Maps node numbers to names
+    std::unordered_map<std::string, int> nodeMap;
+    std::unordered_map<int, std::string> reverseNodeMap;   // Maps node numbers to names
     int nextNodeNumber = 1;                      // Next available node number
     vector<pair<int, int>> wireConnections; // Store node pairs for wires
 
 public:
     // ... existing methods ...
+
+
+    void calculateNodePositions();
 
     void addWire(int node1, int node2) {
         wireConnections.emplace_back(node1, node2);
@@ -422,12 +449,11 @@ public:
     }
 
     // Get all nodes as name-number pairs
-    const std::map<std::string, int>& getNodeMap() const {
+    const std::unordered_map<std::string, int>& getNodeMap() const {
         return nodeMap;
     }
 
-    // Get all nodes as number-name pairs
-    const std::map<int, std::string>& getReverseNodeMap() const {
+    const std::unordered_map<int, std::string>& getReverseNodeMap() const {
         return reverseNodeMap;
     }
 
@@ -491,34 +517,58 @@ public:
         }
     }
 
-    bool deleteComponent(const string& fullName) {
-        if (fullName.empty()) return false;
-
-        char typeChar = toupper(fullName[0]);
-        string name = fullName;
-
-        ComponentType type;
-        switch (typeChar) {
-            case 'R': type = RESISTOR; break;
-            case 'C': type = CAPACITOR; break;
-            case 'L': type = INDUCTOR; break;
-            case 'V': type = VOLTAGE_SOURCE; break;
-            case 'I': type = CURRENT_SOURCE; break;
-            case 'D': type = DIODE; break;
-            case 'G': type = GROUND; break;
-            default: return false;
-        }
-
+    bool deleteComponent(const string& name) {
         for (auto it = components.begin(); it != components.end(); ++it) {
-            if ((*it)->type == type && (*it)->name == name) {
+            if ((*it)->name == name) {
                 delete *it;
                 components.erase(it);
+
+                // Check if any nodes became disconnected and remove them
+                updateNodeConnections();
                 return true;
             }
         }
-
         return false;
     }
+
+    void updateNodeConnections() {
+        // Create a set of all nodes that are still connected
+        std::unordered_set<int> connectedNodes;
+        connectedNodes.insert(0); // Keep ground
+
+        for (const auto& comp : components) {
+            connectedNodes.insert(comp->node1);
+            connectedNodes.insert(comp->node2);
+        }
+
+        // Update node maps to only include connected nodes
+        std::unordered_map<std::string, int> newNodeMap;
+        std::unordered_map<int, std::string> newReverseNodeMap;
+        int newNextNode = 1;
+
+        for (const auto& node : nodeMap) {
+            if (connectedNodes.count(node.second)) {
+                newNodeMap[node.first] = (node.second == 0) ? 0 : newNextNode++;
+                newReverseNodeMap[newNodeMap[node.first]] = node.first;
+            }
+        }
+
+        // Update component node references
+        for (auto& comp : components) {
+            comp->node1 = newNodeMap[reverseNodeMap[comp->node1]];
+            comp->node2 = newNodeMap[reverseNodeMap[comp->node2]];
+        }
+
+        // Update global node tracking
+        nodeMap = newNodeMap;
+        reverseNodeMap = newReverseNodeMap;
+        nextNodeNumber = newNextNode;
+
+        // Recalculate node positions
+        calculateNodePositions();
+    }
+
+
 
     bool renameNode(const string& oldName, const string& newName) {
         if (oldName == "GND" || oldName == "0" || newName == "GND" || newName == "0") {
@@ -741,7 +791,7 @@ public:
         }
 
         int numVars = numNodes + numVSources + numInductors;
-
+        plotSignals.clear();
         while (t <= tStop) {
             vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
             vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
@@ -778,16 +828,34 @@ public:
 
                 x = solveSystem(A, b);
 
-                for (int i = 0; i < numNodes; i++) {
-                    Vtimes.push_back(t);
-                    voltages.push_back(x[i]);
+                // Store node voltages with their times
+                for (int node = 1; node <= numNodes; node++) {
+                    if (node >= plotSignals.size()) {
+                        plotSignals.push_back({vector<double>(), vector<double>(),
+                                               "Node " + to_string(node),
+                                               {static_cast<Uint8>(50 + node*50),
+                                                static_cast<Uint8>(100 + node*30),
+                                                static_cast<Uint8>(150 + node*20), 255}});
+                    }
+                    plotSignals[node-1].time.push_back(t);
+                    plotSignals[node-1].values.push_back(x[node-1]);
                 }
 
-                for (auto comp : components) {
+                // Store component currents
+                for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
+                    auto comp = components[compIdx];
                     if (comp->type == RESISTOR || comp->type == CAPACITOR ||
                         comp->type == INDUCTOR || comp->type == DIODE) {
-                        Itimes.push_back(t);
-                        currents.push_back(comp->getCurrent(x));
+                        int sigIdx = numNodes + compIdx;
+                        if (sigIdx >= plotSignals.size()) {
+                            plotSignals.push_back({vector<double>(), vector<double>(),
+                                                   comp->name + " I",
+                                                   {static_cast<Uint8>(200 - compIdx*20),
+                                                    static_cast<Uint8>(100 + compIdx*10),
+                                                    static_cast<Uint8>(50 + compIdx*15), 255}});
+                        }
+                        plotSignals[sigIdx].time.push_back(t);
+                        plotSignals[sigIdx].values.push_back(comp->getCurrent(x));
                     }
                 }
 
@@ -962,8 +1030,26 @@ public:
 
     static double getTimeStep() { return currentTimeStep; }
     static double getTime() { return currentTime; }
+
+
 };
 
+void Circuit::calculateNodePositions() {
+    nodePositions.clear();
+
+    int xSpacing = 100;
+    int yPos = 100;
+    int xStart = 100;
+
+    for (const auto& node : nodeMap) {
+        int nodeNum = node.second;
+        nodePositions[nodeNum] = {xStart + (nodeNum * xSpacing), yPos};
+    }
+
+    if (nodeMap.count("GND") || nodeMap.count("0")) {
+        nodePositions[0] = {xStart, yPos + 100};  // Position ground below others
+    }
+}
 double Circuit::currentTimeStep = 0.0;
 double Circuit::currentTime = 0.0;
 Component* selectedComponent = nullptr;
@@ -2648,6 +2734,8 @@ void showFileMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
     renderButton(saveBtn);
     renderButton(saveAsBtn);
     renderButton(exitBtn);
+    renderButton(voltageBtn);
+    renderButton(currentBtn);
 }
 
 void showEditMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
@@ -2659,7 +2747,9 @@ void showEditMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
     Button copyBtn = {menuRect.x + 10, menuRect.y + 120, 120, 30, "Copy", currentTheme.button};
     Button pasteBtn = {menuRect.x + 10, menuRect.y + 160, 120, 30, "Paste", currentTheme.button};
     Button deleteBtn = {menuRect.x + 10, menuRect.y + 200, 120, 30, "Delete", RED};
+    Button deleteBtn1 = {menuRect.x + 10, menuRect.y + 200, 120, 30, "Delete", RED};
 
+    renderButton(deleteBtn1);
     renderButton(undoBtn);
     renderButton(redoBtn);
     renderButton(copyBtn);
@@ -3199,27 +3289,52 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
     }
 }
 
-void plotSignals(SDL_Renderer* renderer, const std::vector<double>& voltages,
-                 const std::vector<double>& times, const SDL_Rect& area) {
-    if (voltages.empty() || times.empty()) return;
+void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
+    if (plotSignals.empty()) return;
 
-    double minV = *std::min_element(voltages.begin(), voltages.end());
-    double maxV = *std::max_element(voltages.begin(), voltages.end());
-    double minT = *std::min_element(times.begin(), times.end());
-    double maxT = *std::max_element(times.begin(), times.end());
+    // Draw background
+    SDL_SetRenderDrawColor(renderer, currentTheme.plotBg.r, currentTheme.plotBg.g, currentTheme.plotBg.b, 255);
+    SDL_RenderFillRect(renderer, &area);
 
-    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
-    SDL_RenderDrawLine(renderer, area.x, area.y + area.h/2, area.x + area.w, area.y + area.h/2);
-    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h);
+    // Calculate scales
+    double minTime = plotSignals[0].time.front();
+    double maxTime = plotSignals[0].time.back();
+    double minValue = plotSignals[0].values[0];
+    double maxValue = plotSignals[0].values[0];
 
-    for (size_t i = 1; i < times.size(); i++) {
-        int x1 = area.x + static_cast<int>((times[i-1] - minT) / (maxT - minT) * area.w);
-        int y1 = area.y + area.h - static_cast<int>((voltages[i-1] - minV) / (maxV - minV) * area.h);
-        int x2 = area.x + static_cast<int>((times[i] - minT) / (maxT - minT) * area.w);
-        int y2 = area.y + area.h - static_cast<int>((voltages[i] - minV) / (maxV - minV) * area.h);
-
-        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    for (const auto& sig : plotSignals) {
+        auto minmax = minmax_element(sig.values.begin(), sig.values.end());
+        minValue = min(minValue, *minmax.first);
+        maxValue = max(maxValue, *minmax.second);
     }
+
+    // Apply zoom and pan
+    double timeRange = (maxTime - minTime) / timeZoom;
+    double valueRange = (maxValue - minValue) / valueZoom;
+    double centerTime = (minTime + maxTime) / 2 + timePan;
+    double centerValue = (minValue + maxValue) / 2 + valuePan;
+    minTime = centerTime - timeRange/2;
+    maxTime = centerTime + timeRange/2;
+    minValue = centerValue - valueRange/2;
+    maxValue = centerValue + valueRange/2;
+
+    // Draw grid
+    if (showGrid) {
+        SDL_SetRenderDrawColor(renderer, 200, 200, 200, 100);
+        // Horizontal grid lines
+        for (double v = ceil(minValue); v <= floor(maxValue); v += 1.0) {
+            int y = area.y + area.h - static_cast<int>((v - minValue) / (maxValue - minValue) * area.h);
+            SDL_RenderDrawLine(renderer, area.x, y, area.x + area.w, y);
+        }
+        // Vertical grid lines
+        for (double t = ceil(minTime); t <= floor(maxTime); t += 1.0) {
+            int x = area.x + static_cast<int>((t - minTime) / (maxTime - minTime) * area.w);
+            SDL_RenderDrawLine(renderer, x, area.y, x, area.y + area.h);
+        }
+    }
+
+    // Rest of the function remains the same...
+    // ... [previous implementation continues]
 }
 
 void handleComponentLibraryClick(int x, int y) {
@@ -3496,9 +3611,59 @@ void redo(Circuit*& currentCircuit) {
     }
 }
 
+void plotTransientSignals(SDL_Renderer* renderer, const vector<double>& times,
+                          const vector<double>& values, const SDL_Rect& area,
+                          const string& title, SDL_Color color) {
+    if (times.empty() || values.empty() || times.size() != values.size()) return;
+
+    // Find min/max values for scaling
+    double minVal = *min_element(values.begin(), values.end());
+    double maxVal = *max_element(values.begin(), values.end());
+    double minTime = *min_element(times.begin(), times.end());
+    double maxTime = *max_element(times.begin(), times.end());
+
+    // Add some padding to the scale
+    double range = maxVal - minVal;
+    minVal -= range * 0.1;
+    maxVal += range * 0.1;
+
+    // Draw axes
+    SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+    SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h); // X-axis
+    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h); // Y-axis
+
+    // Draw title
+    renderText(title, area.x + 10, area.y + 10, color);
+
+    // Draw scale labels
+    renderText(to_string(maxTime).substr(0, 5), area.x + area.w - 50, area.y + area.h - 20, currentTheme.text);
+    renderText(to_string(minTime).substr(0, 5), area.x, area.y + area.h - 20, currentTheme.text);
+    renderText(to_string(maxVal).substr(0, 5), area.x + 5, area.y + 10, currentTheme.text);
+    renderText(to_string(minVal).substr(0, 5), area.x + 5, area.y + area.h - 30, currentTheme.text);
+
+    // Draw the signal
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
+    for (size_t i = 1; i < times.size(); i++) {
+        int x1 = area.x + static_cast<int>((times[i-1] - minTime) / (maxTime - minTime) * area.w);
+        int y1 = area.y + area.h - static_cast<int>((values[i-1] - minVal) / (maxVal - minVal) * area.h);
+        int x2 = area.x + static_cast<int>((times[i] - minTime) / (maxTime - minTime) * area.w);
+        int y2 = area.y + area.h - static_cast<int>((values[i] - minVal) / (maxVal - minVal) * area.h);
+
+        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    }
+}
+
+
+
+
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
     renderStatus(renderer);
+    double timeZoom = 1.0;
+    double valueZoom = 1.0;
+    double timePan = 0.0;
+    double valuePan = 0.0;
+
 
     string currentCircuitFile = "";
     Circuit* circuit = new Circuit();
@@ -3588,6 +3753,15 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
+
+                if (isMouseOver(voltageBtn.rect, x, y)) {
+                    showVoltage = true;
+                    showCurrent = false;
+                }
+                else if (isMouseOver(currentBtn.rect, x, y)) {
+                    showVoltage = false;
+                    showCurrent = true;
+                }
                 // Handle component library
                 if (ComponentLibrary) {
                     handleComponentLibraryClick(x, y);
@@ -3599,6 +3773,17 @@ int main(int argc, char* argv[]) {
                         ComponentLibrary = false;
                     }
                     continue;
+                }
+                // In your mouse event handler:
+                if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
+                    y >= plotArea.y && y <= plotArea.y + plotArea.h) {
+                    // Check if clicked on legend
+                    if (showLegend && x < plotArea.x + 150) {
+                        int legendIndex = (y - plotArea.y - 10) / 20;
+                        if (legendIndex >= 0 && legendIndex < plotSignals.size()) {
+                            selectedSignalIndex = legendIndex;
+                        }
+                    }
                 }
 
                 // Handle file menu
@@ -3649,6 +3834,16 @@ int main(int argc, char* argv[]) {
                             if (!redoStack.empty()) {
                                 saveUndoState(circuit); // Current state becomes undo
                                 redo(circuit);
+                            }
+                            EditMenu = false;
+                        }
+                            // In the mouse button down event handling for edit menu:
+                        else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) { // Delete
+                            if (selectedComponent) {
+                                saveUndoState(circuit);
+                                circuit->deleteComponent(selectedComponent->name);
+                                selectedComponent = nullptr;
+                                calculateNodePositions(*circuit);
                             }
                             EditMenu = false;
                         }
@@ -3823,8 +4018,77 @@ int main(int argc, char* argv[]) {
                     inputText = "";
                 }
             }
+                // In your event handling section
+            else if (event.type == SDL_MOUSEWHEEL) {
+                // Zoom with mouse wheel (Ctrl for vertical zoom only)
+                if (SDL_GetModState() & KMOD_CTRL) {
+                    if (event.wheel.y > 0) valueZoom *= 1.2;
+                    else if (event.wheel.y < 0) valueZoom /= 1.2;
+                } else {
+                    if (event.wheel.y > 0) {
+                        timeZoom *= 1.2;
+                        valueZoom *= 1.2;
+                    } else if (event.wheel.y < 0) {
+                        timeZoom /= 1.2;
+                        valueZoom /= 1.2;
+                    }
+                }
+                // Clamp zoom values
+                timeZoom = std::max(0.1, std::min(timeZoom, 20.0));
+                valueZoom = std::max(0.1, std::min(valueZoom, 20.0));
+            }
+            else if (event.type == SDL_MOUSEMOTION) {
+                // Pan with middle mouse drag
+                if (event.motion.state & SDL_BUTTON_MMASK) {
+                    if (!plotSignals.empty() && !plotSignals[0].time.empty()) {
+                        double timeRange = (plotSignals[0].time.back() - plotSignals[0].time.front()) / timeZoom;
+                        double minVal = *min_element(plotSignals[0].values.begin(), plotSignals[0].values.end());
+                        double maxVal = *max_element(plotSignals[0].values.begin(), plotSignals[0].values.end());
+                        double valueRange = (maxVal - minVal) / valueZoom;
+
+                        timePan += event.motion.xrel * timeRange / plotArea.w;
+                        valuePan -= event.motion.yrel * valueRange / plotArea.h;
+                    }
+                }
+            }
             else if (event.type == SDL_TEXTINPUT && textInputActive) {
                 inputText += event.text.text;
+            }
+
+                // Add to your event handling:
+            else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_RIGHT) {
+                int x, y;
+                SDL_GetMouseState(&x, &y);
+
+                // Check if right-clicked on a component
+                handleComponentSelection(circuit, x, y);
+
+                if (selectedComponent) {
+                    // Show context menu with delete option
+                    SDL_Rect menu = {x, y, 100, 40};
+                    SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
+                    SDL_RenderFillRect(renderer, &menu);
+
+                    Button deleteBtn = {x, y, 100, 40, "Delete", RED};
+                    renderButton(deleteBtn);
+                    SDL_RenderPresent(renderer);
+
+                    // Wait for user choice
+                    bool choiceMade = false;
+                    while (!choiceMade) {
+                        while (SDL_PollEvent(&event)) {
+                            if (event.type == SDL_MOUSEBUTTONDOWN) {
+                                if (isMouseOver(deleteBtn.rect, event.button.x, event.button.y)) {
+                                    saveUndoState(circuit);
+                                    circuit->deleteComponent(selectedComponent->name);
+                                    selectedComponent = nullptr;
+                                    calculateNodePositions(*circuit);
+                                }
+                                choiceMade = true;
+                            }
+                        }
+                    }
+                }
             }
             else if (event.type == SDL_KEYDOWN) {
                 // Handle ESC to cancel placement
@@ -3834,6 +4098,15 @@ int main(int argc, char* argv[]) {
                 }
                 else if (event.key.keysym.sym == SDLK_h) {  // H for help
                     showShortcutHelp = !showShortcutHelp;
+                }
+                    // In the SDL_KEYDOWN event handler:
+                else if (event.key.keysym.sym == SDLK_DELETE) {
+                    if (selectedComponent) {
+                        saveUndoState(circuit);
+                        circuit->deleteComponent(selectedComponent->name);
+                        selectedComponent = nullptr;
+                        calculateNodePositions(*circuit);
+                    }
                 }
                     // Handle 'W' for wire placement
                 else if (event.key.keysym.mod & KMOD_SHIFT) {
@@ -3903,6 +4176,7 @@ int main(int argc, char* argv[]) {
         SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
         SDL_RenderClear(renderer);
 
+
         // Draw circuit area
         SDL_SetRenderDrawColor(renderer, currentTheme.circuitBg.r, currentTheme.circuitBg.g, currentTheme.circuitBg.b, 255);
         SDL_RenderFillRect(renderer, &circuitArea);
@@ -3916,19 +4190,27 @@ int main(int argc, char* argv[]) {
         SDL_RenderDrawRect(renderer, &plotArea);
 
         // Draw the circuit
+        // Draw the circuit
         if (circuit) {
             drawCircuit(*circuit, renderer);
         }
 
-        // Draw plots if we have data
-        if (!voltages.empty() && showVoltage) {
-            plotSignals(renderer, voltages, Vtimes, plotArea);
+// Draw plots if we have data
+        // Replace your old plot drawing code with:
+        if (!plotSignals.empty()) {
+            drawLTspiceStylePlot(renderer, plotArea);
+
+            // Add measurement cursor if needed
+            if (selectedSignalIndex >= 0) {
+                // ... cursor drawing code ...
+            }
         }
 
         // Draw toolbar
         drawToolbar(renderer);
 
         // Draw text boxes
+
         renderTextBox(node1Box);
         renderTextBox(node2Box);
         renderTextBox(valueBox);
