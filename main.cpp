@@ -83,6 +83,7 @@ bool FileMenu = false;
 bool EditMenu = false;
 bool ComponentLibrary = false;
 bool AnalysisSettings = false;
+bool showShortcutHelp = false;
 
 double tStep = 0.001;
 double tStop = 0.1;
@@ -209,7 +210,11 @@ enum PlacementMode {
     PLACE_CURRENT_SOURCE,
     PLACE_DIODE,
     PLACE_GROUND,
-    PLACE_WIRE  // Add this for wire placement
+    PLACE_WIRE,
+    PLACE_VCVS,
+    PLACE_VCCS,
+    PLACE_CCCS,
+    PLACE_CCVS
 };
 
 void drawWire(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, SDL_Color color) {
@@ -2570,11 +2575,12 @@ void saveUndoState(Circuit*& currentCircuit) {
     redoStack.clear();
 
     // Save current state to undo stack
-    Circuit* copy = new Circuit(*currentCircuit);
+    Circuit* copy = new Circuit();
+    *copy = *currentCircuit; // Properly copy the circuit
     undoStack.push_back(copy);
 
     // Limit undo stack size
-    if (undoStack.size() > 10) {
+    if (undoStack.size() > 20) {
         delete undoStack.front();
         undoStack.erase(undoStack.begin());
     }
@@ -2842,22 +2848,38 @@ void drawResistorPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2)
     SDL_RenderDrawLines(renderer, points, segments + 1);
 }
 
-void drawCapacitor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
+void drawCapacitorPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     const int gap = 12;
 
-    int px1, py1, px2, py2;
-    getPerpendicularPoints(x1, y1, x2, y2, gap/2, px1, py1, px2, py2);
-    int nx1, ny1, nx2, ny2;
-    getPerpendicularPoints(x1, y1, x2, y2, -gap/2, nx1, ny1, nx2, ny2);
+    // Calculate perpendicular points
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float length = sqrt(dx*dx + dy*dy);
+    dx /= length;
+    dy /= length;
+    float px = -dy;
+    float py = dx;
 
-    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
-    SDL_RenderDrawLine(renderer, px1, py1, px2, py2);
-    SDL_RenderDrawLine(renderer, nx1, ny1, nx2, ny2);
+    // Draw plates
+    SDL_Point plate1[2], plate2[2];
+    plate1[0].x = x1 + dx * (length/2 - gap) + px * gap/2;
+    plate1[0].y = y1 + dy * (length/2 - gap) + py * gap/2;
+    plate1[1].x = x1 + dx * (length/2 - gap) - px * gap/2;
+    plate1[1].y = y1 + dy * (length/2 - gap) - py * gap/2;
 
-    renderText(name, (x1 + x2)/2, (y1 + y2)/2 - gap, BLACK);
+    plate2[0].x = x1 + dx * (length/2 + gap) + px * gap/2;
+    plate2[0].y = y1 + dy * (length/2 + gap) + py * gap/2;
+    plate2[1].x = x1 + dx * (length/2 + gap) - px * gap/2;
+    plate2[1].y = y1 + dy * (length/2 + gap) - py * gap/2;
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLine(renderer, x1, y1, plate1[0].x, plate1[0].y);
+    SDL_RenderDrawLine(renderer, plate2[1].x, plate2[1].y, x2, y2);
+    SDL_RenderDrawLine(renderer, plate1[0].x, plate1[0].y, plate1[1].x, plate1[1].y);
+    SDL_RenderDrawLine(renderer, plate2[0].x, plate2[0].y, plate2[1].x, plate2[1].y);
 }
 
-void drawInductor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
+void drawInductorPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     const int loops = 3;
     const int radius = 8;
 
@@ -2870,43 +2892,119 @@ void drawInductor(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const 
     float py = dx;
 
     float segmentLength = length / (loops * 2);
+    SDL_Point prevPoint = {x1, y1};
+
     for (int i = 0; i < loops; i++) {
         float centerX = x1 + dx * (i * 2 + 1) * segmentLength;
         float centerY = y1 + dy * (i * 2 + 1) * segmentLength;
 
         for (int angle = -90; angle <= 90; angle += 5) {
             float rad = angle * M_PI / 180.0f;
-            float x = centerX + px * radius * cos(rad);
-            float y = centerY + py * radius * sin(rad);
+            int x = centerX + px * radius * cos(rad);
+            int y = centerY + py * radius * sin(rad);
+
             if (angle == -90) {
-                SDL_RenderDrawPoint(renderer, (int)x, (int)y);
+                prevPoint = {x, y};
             } else {
-                SDL_RenderDrawLine(renderer, (int)x, (int)y, (int)x, (int)y);
+                SDL_RenderDrawLine(renderer, prevPoint.x, prevPoint.y, x, y);
+                prevPoint = {x, y};
             }
         }
     }
 
-    renderText(name, (x1 + x2)/2 + px * radius*2, (y1 + y2)/2 + py * radius*2, BLACK);
+    SDL_RenderDrawLine(renderer, prevPoint.x, prevPoint.y, x2, y2);
 }
 
-void drawVoltageSource(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, const string& name) {
+void drawVoltageSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     const int radius = 12;
     int centerX = (x1 + x2) / 2;
     int centerY = (y1 + y2) / 2;
 
-    SDL_SetRenderDrawColor(renderer, BLACK.r, BLACK.g, BLACK.b, 255);
-    for (int angle = 0; angle < 360; angle += 5) {
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLine(renderer, x1, y1, centerX - radius, centerY);
+    SDL_RenderDrawLine(renderer, centerX + radius, centerY, x2, y2);
+
+    // Draw circle
+    for (int angle = 0; angle < 360; angle += 10) {
         float rad = angle * M_PI / 180.0f;
         int x = centerX + radius * cos(rad);
         int y = centerY + radius * sin(rad);
         SDL_RenderDrawPoint(renderer, x, y);
     }
 
+    // Draw plus sign
     SDL_RenderDrawLine(renderer, centerX-5, centerY, centerX+5, centerY);
     SDL_RenderDrawLine(renderer, centerX, centerY-5, centerX, centerY+5);
-    SDL_RenderDrawLine(renderer, centerX-5, centerY+radius+5, centerX+5, centerY+radius+5);
+}
 
-    renderText(name, centerX, centerY + radius + 15, BLACK);
+void drawCurrentSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
+    const int radius = 12;
+    int centerX = (x1 + x2) / 2;
+    int centerY = (y1 + y2) / 2;
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLine(renderer, x1, y1, centerX - radius, centerY);
+    SDL_RenderDrawLine(renderer, centerX + radius, centerY, x2, y2);
+
+    // Draw circle
+    for (int angle = 0; angle < 360; angle += 10) {
+        float rad = angle * M_PI / 180.0f;
+        int x = centerX + radius * cos(rad);
+        int y = centerY + radius * sin(rad);
+        SDL_RenderDrawPoint(renderer, x, y);
+    }
+
+    // Draw arrow
+    SDL_RenderDrawLine(renderer, centerX, centerY-8, centerX, centerY+8);
+    SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX-5, centerY+3);
+    SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX+5, centerY+3);
+}
+
+void drawDiodePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
+    const int triangleSize = 15;
+
+    float dx = x2 - x1;
+    float dy = y2 - y1;
+    float length = sqrt(dx*dx + dy*dy);
+    dx /= length;
+    dy /= length;
+    float px = -dy;
+    float py = dx;
+
+    int midX = (x1 + x2) / 2;
+    int midY = (y1 + y2) / 2;
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLine(renderer, x1, y1, midX - dx * triangleSize, midY - dy * triangleSize);
+    SDL_RenderDrawLine(renderer, midX + dx * triangleSize, midY + dy * triangleSize, x2, y2);
+
+    // Draw triangle
+    SDL_Point triangle[4];
+    triangle[0] = {int(midX - dx * triangleSize), int(midY - dy * triangleSize)};
+    triangle[1] = {int(midX + px * triangleSize), int(midY + py * triangleSize)};
+    triangle[2] = {int(midX - px * triangleSize), int(midY - py * triangleSize)};
+    triangle[3] = triangle[0];
+
+    SDL_RenderDrawLines(renderer, triangle, 4);
+
+    // Draw line
+    SDL_RenderDrawLine(renderer,
+        midX + dx * triangleSize/2 + px * triangleSize/2,
+        midY + dy * triangleSize/2 + py * triangleSize/2,
+        midX + dx * triangleSize/2 - px * triangleSize/2,
+        midY + dy * triangleSize/2 - py * triangleSize/2);
+}
+
+void drawGroundPreview(SDL_Renderer* renderer, int x, int y) {
+    const int size = 15;
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLine(renderer, x, y, x, y + size);
+
+    // Draw horizontal lines
+    SDL_RenderDrawLine(renderer, x - size, y + size, x + size, y + size);
+    SDL_RenderDrawLine(renderer, x - size/2, y + size*1.5, x + size/2, y + size*1.5);
+    SDL_RenderDrawLine(renderer, x - size/4, y + size*2, x + size/4, y + size*2);
 }
 
 int findOrCreateNodeAt(int x, int y) {
@@ -3066,8 +3164,27 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
             switch(currentPlacementMode) {
                 case PLACE_RESISTOR:
                     drawResistorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+                case PLACE_CAPACITOR:
+                    drawCapacitorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+                case PLACE_INDUCTOR:
+                    drawInductorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+                case PLACE_VOLTAGE_SOURCE:
+                    drawVoltageSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+                case PLACE_CURRENT_SOURCE:
+                    drawCurrentSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+                case PLACE_DIODE:
+                    drawDiodePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+                case PLACE_GROUND:
+                    drawGroundPreview(renderer, mouseX, mouseY);
+                break;
+                default:
                     break;
-                    // ... other component previews ...
             }
         }
     }
@@ -3157,16 +3274,16 @@ void handleComponentLibraryClick(int x, int y) {
     }
     else if (showDependents) {
         if (isMouseOver(vcvsBtn.rect, x, y)) {
-            selectedComponentType = "VCVS";
+            currentPlacementMode = PLACE_VCVS;
         }
         else if (isMouseOver(vccsBtn.rect, x, y)) {
-            selectedComponentType = "VCCS";
+            currentPlacementMode = PLACE_VCCS;
         }
         else if (isMouseOver(ccvsBtn.rect, x, y)) {
-            selectedComponentType = "CCVS";
+            currentPlacementMode = PLACE_CCVS;
         }
         else if (isMouseOver(cccsBtn.rect, x, y)) {
-            selectedComponentType = "CCCS";
+            currentPlacementMode = PLACE_CCCS;
         }
     }
 }
@@ -3315,6 +3432,10 @@ void renderStatus(SDL_Renderer* renderer) {
             case PLACE_DIODE: modeName = "Diode (Shift+D)"; break;
             case PLACE_GROUND: modeName = "Ground (Shift+G)"; break;
             case PLACE_WIRE: modeName = "Wire (W)"; break;
+            case PLACE_VCVS: modeName = "VCVS"; break;
+            case PLACE_VCCS: modeName = "VCCS"; break;
+            case PLACE_CCVS: modeName = "CCVS"; break;
+            case PLACE_CCCS: modeName = "CCCS"; break;
             default: modeName = "Unknown"; break;
         }
 
@@ -3341,7 +3462,39 @@ void renderShortcutHelp(SDL_Renderer* renderer) {
     renderText("ESC - Cancel placement", 20, y, currentTheme.text); y += 25;
 }
 
-bool showShortcutHelp = false;
+void undo(Circuit*& currentCircuit) {
+    if (!undoStack.empty()) {
+        // Save current state to redo stack
+        Circuit* redoState = new Circuit();
+        *redoState = *currentCircuit;
+        redoStack.push_back(redoState);
+
+        // Restore from undo stack
+        delete currentCircuit;
+        currentCircuit = new Circuit(*undoStack.back());
+        undoStack.pop_back();
+
+        // Recalculate node positions
+        calculateNodePositions(*currentCircuit);
+    }
+}
+
+void redo(Circuit*& currentCircuit) {
+    if (!redoStack.empty()) {
+        // Save current state to undo stack
+        Circuit* undoState = new Circuit();
+        *undoState = *currentCircuit;
+        undoStack.push_back(undoState);
+
+        // Restore from redo stack
+        delete currentCircuit;
+        currentCircuit = new Circuit(*redoStack.back());
+        redoStack.pop_back();
+
+        // Recalculate node positions
+        calculateNodePositions(*currentCircuit);
+    }
+}
 
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
@@ -3364,8 +3517,6 @@ int main(int argc, char* argv[]) {
     bool SaveAsDialog = false;
 
     // Initialize node positions with ground node
-// In main(), before the main loop:
-// Initialize node positions with ground node
     nodePositions[0] = {100, 500};
     reverseNodeMap[0] = "GND";
     nextNodeNumber = 1; // Start numbering regular nodes from 1
@@ -3490,20 +3641,14 @@ int main(int argc, char* argv[]) {
                         if (y >= editMenuRect.y + 40 && y <= editMenuRect.y + 70) { // Undo
                             if (!undoStack.empty()) {
                                 saveUndoState(circuit); // Current state becomes redo
-                                delete circuit;
-                                circuit = new Circuit(*undoStack.back());
-                                undoStack.pop_back();
-                                calculateNodePositions(*circuit);
+                                undo(circuit);
                             }
                             EditMenu = false;
                         }
                         else if (y >= editMenuRect.y + 80 && y <= editMenuRect.y + 110) { // Redo
                             if (!redoStack.empty()) {
                                 saveUndoState(circuit); // Current state becomes undo
-                                delete circuit;
-                                circuit = new Circuit(*redoStack.back());
-                                redoStack.pop_back();
-                                calculateNodePositions(*circuit);
+                                redo(circuit);
                             }
                             EditMenu = false;
                         }
@@ -3528,7 +3673,21 @@ int main(int argc, char* argv[]) {
                                 if (type == "Resistor") {
                                     newComp = new Resistor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
                                 }
-                                // ... other component types ...
+                                if (type == "Capacitor") {
+                                    newComp = new Capacitor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                if (type == "Inductor") {
+                                    newComp = new Inductor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                if (type == "Voltage") {
+                                    newComp = new VoltageSource(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                if (type == "Current") {
+                                    newComp = new CurrentSource(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
+                                }
+                                if (type == "Ground") {
+                                    newComp = new Ground(name, getOrCreateNode(node1));
+                                }
 
                                 if (newComp) {
                                     saveUndoState(circuit);
@@ -3815,9 +3974,6 @@ int main(int argc, char* argv[]) {
             renderShortcutHelp(renderer);
         }
 
-// Update screen
-        SDL_RenderPresent(renderer);
-
         // Show placement mode status
         if (currentPlacementMode != PLACE_NONE) {
             string modeName = "";
@@ -3838,6 +3994,9 @@ int main(int argc, char* argv[]) {
             }
 
             renderText(message, 10, SCREEN_HEIGHT - 30, currentTheme.text);
+
+            // Update screen
+            SDL_RenderPresent(renderer);
         }
 
         // Update screen
