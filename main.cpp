@@ -386,8 +386,8 @@ public:
 
     virtual void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const = 0;
     virtual SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const = 0;
-
-
+    // Add this to Component base class:
+    virtual Component* clone() const = 0;
 
 };
 
@@ -398,15 +398,87 @@ public:
     static double currentTimeStep;
     static double currentTime;
     vector<pair<int, int>> wireConnections;
+    std::map<int, SDL_Point> nodePositions;
     std::unordered_map<std::string, int> nodeMap;
     std::unordered_map<int, std::string> reverseNodeMap;
     int nextNodeNumber = 1;
 
-    Circuit() : maxNode(0) {}
+    Circuit(const Circuit& other) {
+        // Copy components
+        for (const auto& comp : other.components) {
+            components.push_back(comp->clone());
+        }
+
+        // Copy node information
+        nodeMap = other.nodeMap;
+        reverseNodeMap = other.reverseNodeMap;
+        nextNodeNumber = other.nextNodeNumber;
+        maxNode = other.maxNode;
+
+        // Copy wires
+        wireConnections = other.wireConnections;
+
+        // Copy node positions
+        nodePositions = other.nodePositions;
+    }
+
+    Circuit() : maxNode(0){}
+
+    // Clone method for polymorphic copying
+    Circuit* clone() const {
+        return new Circuit(*this);
+    }
+
+    // Assignment operator
+    Circuit& operator=(const Circuit& other) {
+        if (this != &other) {
+            // Clear current state
+            for (auto comp : components) {
+                delete comp;
+            }
+            components.clear();
+
+            // Copy components
+            for (const auto& comp : other.components) {
+                components.push_back(comp->clone());
+            }
+
+            // Copy other members
+            nodeMap = other.nodeMap;
+            reverseNodeMap = other.reverseNodeMap;
+            nextNodeNumber = other.nextNodeNumber;
+            maxNode = other.maxNode;
+            wireConnections = other.wireConnections;
+            nodePositions = other.nodePositions;
+        }
+        return *this;
+    }
 
     ~Circuit() {
         for (auto comp : components) {
             delete comp;
+        }
+    }
+
+    void updateNodePositions() {
+        // Simple layout - arrange nodes horizontally with ground at bottom
+        int x = 100;
+        int y = 100;
+        int groundY = 500;
+
+        nodePositions.clear();
+
+        // Position ground node
+        nodePositions[0] = {100, groundY};
+
+        // Position other nodes
+        for (int i = 1; i < nextNodeNumber; i++) {
+            nodePositions[i] = {x, y};
+            x += 100;
+            if (x > 700) {
+                x = 100;
+                y += 100;
+            }
         }
     }
 
@@ -1186,7 +1258,6 @@ public:
         renderText(name, midX, midY, currentTheme.text);
     }
 
-
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
         SDL_Point p1 = getNodePosition(node1);
         SDL_Point p2 = getNodePosition(node2);
@@ -1197,6 +1268,10 @@ public:
         rect.w = abs(p1.x - p2.x) + 30;
         rect.h = abs(p1.y - p2.y) + 30;
         return rect;
+    }
+
+    Component* clone() const override {
+        return new Resistor(*this);
     }
 };
 
@@ -1292,6 +1367,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new Capacitor(*this);
     }
 };
 
@@ -1391,6 +1470,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new Inductor(*this);
     }
 };
 
@@ -1510,6 +1593,10 @@ public:
 
         return rect;
     }
+
+    Component* clone() const override {
+        return new Diode(*this);
+    }
 };
 
 class Ground : public Component {
@@ -1568,6 +1655,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new Ground(*this);
     }
 };
 
@@ -1641,6 +1732,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new VoltageSource(*this);
     }
 };
 
@@ -1729,6 +1824,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new SinVoltageSource(*this);
     }
 };
 
@@ -1828,6 +1927,10 @@ public:
 
         return rect;
     }
+
+    Component* clone() const override {
+        return new PulseVoltageSource(*this);
+    }
 };
 
 class CurrentSource : public Component {
@@ -1894,6 +1997,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new CurrentSource(*this);
     }
 };
 
@@ -1977,6 +2084,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new SinCurrentSource(*this);
     }
 };
 
@@ -2070,6 +2181,10 @@ public:
 
         return rect;
     }
+
+    Component* clone() const override {
+        return new PulseCurrentSource(*this);
+    }
 };
 
 class VCVS : public Component {
@@ -2145,6 +2260,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new VCVS(*this);
     }
 };
 
@@ -2226,6 +2345,10 @@ public:
 
         return rect;
     }
+
+    Component* clone() const override {
+        return new CCVS(*this);
+    }
 };
 
 class VCCS : public Component {
@@ -2295,6 +2418,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new VCCS(*this);
     }
 };
 
@@ -2369,6 +2496,10 @@ public:
         rect.h = abs(p1.y - p2.y) + 30;
 
         return rect;
+    }
+
+    Component* clone() const override {
+        return new CCCS(*this);
     }
 };
 
@@ -2641,52 +2772,9 @@ void saveUndoState(Circuit*& currentCircuit) {
     }
     redoStack.clear();
 
-    // Create a deep copy of the current circuit
-    Circuit* copy = new Circuit();
-
-    // Copy node information
-    copy->nodeMap = currentCircuit->nodeMap;
-    copy->reverseNodeMap = currentCircuit->reverseNodeMap;
-    copy->nextNodeNumber = currentCircuit->nextNodeNumber;
-
-    // Copy components
-    for (auto comp : currentCircuit->getComponents()) {
-        Component* newComp = nullptr;
-
-        switch(comp->type) {
-            case RESISTOR:
-                newComp = new Resistor(comp->name, comp->node1, comp->node2, comp->value);
-                break;
-            case CAPACITOR:
-                newComp = new Capacitor(comp->name, comp->node1, comp->node2, comp->value);
-                break;
-            case INDUCTOR:
-                newComp = new Inductor(comp->name, comp->node1, comp->node2, comp->value);
-                break;
-            case VOLTAGE_SOURCE:
-                newComp = new VoltageSource(comp->name, comp->node1, comp->node2, comp->value);
-                break;
-            case CURRENT_SOURCE:
-                newComp = new CurrentSource(comp->name, comp->node1, comp->node2, comp->value);
-                break;
-            case DIODE:
-                newComp = new Diode(comp->name, comp->node1, comp->node2);
-                break;
-            case GROUND:
-                newComp = new Ground(comp->name, comp->node1);
-                break;
-            // Add other component types as needed
-            default:
-                break;
-        }
-
-        if (newComp) {
-            copy->components.push_back(newComp);
-        }
-    }
-
-    // Copy wire connections
-    copy->wireConnections = currentCircuit->wireConnections;
+    // Create a deep copy including node positions
+    Circuit* copy = new Circuit(*currentCircuit);
+    copy->nodePositions = currentCircuit->nodePositions; // Copy node positions
 
     undoStack.push_back(copy);
 
@@ -2694,6 +2782,36 @@ void saveUndoState(Circuit*& currentCircuit) {
     if (undoStack.size() > 20) {
         delete undoStack.front();
         undoStack.erase(undoStack.begin());
+    }
+}
+
+void undo(Circuit*& currentCircuit) {
+    if (!undoStack.empty()) {
+        // Save current state to redo stack
+        Circuit* redoState = new Circuit(*currentCircuit);
+        redoState->nodePositions = currentCircuit->nodePositions;
+        redoStack.push_back(redoState);
+
+        // Restore from undo stack
+        delete currentCircuit;
+        currentCircuit = new Circuit(*undoStack.back());
+        currentCircuit->nodePositions = undoStack.back()->nodePositions;
+        undoStack.pop_back();
+    }
+}
+
+void redo(Circuit*& currentCircuit) {
+    if (!redoStack.empty()) {
+        // Save current state to undo stack
+        Circuit* undoState = new Circuit(*currentCircuit);
+        undoState->nodePositions = currentCircuit->nodePositions;
+        undoStack.push_back(undoState);
+
+        // Restore from redo stack
+        delete currentCircuit;
+        currentCircuit = new Circuit(*redoStack.back());
+        currentCircuit->nodePositions = redoStack.back()->nodePositions;
+        redoStack.pop_back();
     }
 }
 
@@ -2821,12 +2939,12 @@ void showComponentProperties(SDL_Renderer* renderer, Component* component) {
 void showSaveAsDialog(SDL_Renderer* renderer, string& currentFilename) {
     SDL_Rect dialog = {250, 200, 300, 200};
 
-    SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+    SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
     SDL_RenderFillRect(renderer, &dialog);
 
-    renderText("Save Circuit As", dialog.x + 20, dialog.y + 20, BLACK);
+    renderText("Save Circuit As", dialog.x + 20, dialog.y + 20, currentTheme.text);
 
-    renderText("Filename:", dialog.x + 20, dialog.y + 60, BLACK);
+    renderText("Filename:", dialog.x + 20, dialog.y + 60, currentTheme.text);
     nameBox = {dialog.x + 100, dialog.y + 60, 180, 30, currentFilename};
     renderTextBox(nameBox);
 
@@ -3125,6 +3243,7 @@ void drawGroundPreview(SDL_Renderer* renderer, int x, int y) {
 int findOrCreateNodeAt(int x, int y) {
     const int NODE_PROXIMITY_THRESHOLD = 15;
 
+    // First check if we're near an existing node
     for (const auto& node : nodePositions) {
         int dx = x - node.second.x;
         int dy = y - node.second.y;
@@ -3133,9 +3252,11 @@ int findOrCreateNodeAt(int x, int y) {
         }
     }
 
+    // If not, create a new node
     int newNode = nextNodeNumber++;
     nodePositions[newNode] = {x, y};
     reverseNodeMap[newNode] = to_string(newNode);
+    nodeMap[to_string(newNode)] = newNode;
     return newNode;
 }
 
@@ -3156,74 +3277,75 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
     static int compCount = 1;
 
     if (!isPlacingComponent && currentPlacementMode != PLACE_NONE) {
-        // First click - start placement
         placementStartPoint = {x, y};
         isPlacingComponent = true;
         return;
     }
 
     if (isPlacingComponent) {
-
-        // Second click - finish placement
         if (currentPlacementMode == PLACE_WIRE) {
             int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
             int node2 = findOrCreateNodeAt(x, y);
 
-            saveUndoState(circuit);
-            circuit->addWire(node1, node2);
-            cout << "Created wire between node " << node1 << " and " << node2 << endl;
+            if (node1 != node2) { // Prevent connecting node to itself
+                saveUndoState(circuit);
+                circuit->addWire(node1, node2);
+                cout << "Created wire between node " << node1 << " and " << node2 << endl;
+            }
         }
         else {
-            string name = "";
+            string name;
             Component* newComp = nullptr;
-            double Value = valueBox.text.empty() ? 0.0 : parseSpiceValue(valueBox.text);
+            double value = valueBox.text.empty() ? 0.0 : parseSpiceValue(valueBox.text);
 
             int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
-            int node2 = findOrCreateNodeAt(x, y);
+            int node2 = (currentPlacementMode == PLACE_GROUND) ? 0 : findOrCreateNodeAt(x, y);
 
-            switch(currentPlacementMode) {
-                case PLACE_RESISTOR:
-                    name = "R" + to_string(compCount++);
-                    if (Value <= 0) Value = 1000.0;
-                    newComp = new Resistor(name, node1, node2, Value);
-                    break;
-                case PLACE_CAPACITOR:
-                    name = "C" + to_string(compCount++);
-                    if (Value <= 0) Value = 1e-6;
-                    newComp = new Capacitor(name, node1, node2, Value);
-                    break;
-                case PLACE_INDUCTOR:
-                    name = "L" + to_string(compCount++);
-                    if (Value <= 0) Value = 1e-3;
-                    newComp = new Inductor(name, node1, node2, Value);
-                    break;
-                case PLACE_VOLTAGE_SOURCE:
-                    name = "V" + to_string(compCount++);
-                    if (Value <= 0) Value = 5.0;
-                    newComp = new VoltageSource(name, node1, node2, Value);
-                    break;
-                case PLACE_CURRENT_SOURCE:
-                    name = "I" + to_string(compCount++);
-                    if (Value <= 0) Value = 0.1;
-                    newComp = new CurrentSource(name, node1, node2, Value);
-                    break;
-                case PLACE_DIODE:
-                    name = "D" + to_string(compCount++);
-                    newComp = new Diode(name, node1, node2);
-                    break;
-                case PLACE_GROUND:
-                    name = "GND" + to_string(compCount++);
-                    newComp = new Ground(name, node1);
-                    break;
-                default:
-                    break;
-            }
+            if (node1 != node2 || currentPlacementMode == PLACE_GROUND) { // Prevent connecting node to itself
+                switch(currentPlacementMode) {
+                    case PLACE_RESISTOR:
+                        name = "R" + to_string(compCount++);
+                        if (value <= 0) value = 1000.0;
+                        newComp = new Resistor(name, node1, node2, value);
+                        break;
+                    case PLACE_CAPACITOR:
+                        name = "C" + to_string(compCount++);
+                        if (value <= 0) value = 1e-6;
+                        newComp = new Capacitor(name, node1, node2, value);
+                        break;
+                    case PLACE_INDUCTOR:
+                        name = "L" + to_string(compCount++);
+                        if (value <= 0) value = 1e-3;
+                        newComp = new Inductor(name, node1, node2, value);
+                        break;
+                    case PLACE_VOLTAGE_SOURCE:
+                        name = "V" + to_string(compCount++);
+                        if (value <= 0) value = 5.0;
+                        newComp = new VoltageSource(name, node1, node2, value);
+                        break;
+                    case PLACE_CURRENT_SOURCE:
+                        name = "I" + to_string(compCount++);
+                        if (value <= 0) value = 0.1;
+                        newComp = new CurrentSource(name, node1, node2, value);
+                        break;
+                    case PLACE_DIODE:
+                        name = "D" + to_string(compCount++);
+                        newComp = new Diode(name, node1, node2);
+                        break;
+                    case PLACE_GROUND:
+                        name = "GND" + to_string(compCount++);
+                        newComp = new Ground(name, node1);
+                        break;
+                    default:
+                        break;
+                }
 
-            if (newComp) {
-                saveUndoState(circuit);
-                circuit->addComponent(newComp);
-                cout << "Added " << newComp->getType() << " " << name
-                     << " between nodes " << node1 << " and " << node2 << endl;
+                if (newComp) {
+                    saveUndoState(circuit);
+                    circuit->addComponent(newComp);
+                    cout << "Added " << newComp->getType() << " " << name
+                         << " between nodes " << node1 << " and " << node2 << endl;
+                }
             }
         }
 
@@ -3239,7 +3361,6 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         drawWire(renderer, p1.x, p1.y, p2.x, p2.y, currentTheme.text);
     }
 
-    // Rest of your drawing code...
     // Draw all components
     for (const auto& comp : circuit.getComponents()) {
         comp->render(renderer, nodePositions);
@@ -3260,8 +3381,6 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         string label = (node.first == 0) ? "GND" : to_string(node.first);
         renderText(label, node.second.x + 12, node.second.y - 8, currentTheme.text);
     }
-
-    // Draw placement preview if in placement mode
 
     // In your drawing code where you handle placement preview:
     if (isPlacingComponent) {
@@ -3588,40 +3707,6 @@ void renderShortcutHelp(SDL_Renderer* renderer) {
     renderText("ESC - Cancel placement", 20, y, currentTheme.text); y += 25;
 }
 
-void undo(Circuit*& currentCircuit) {
-    if (!undoStack.empty()) {
-        // Save current state to redo stack
-        Circuit* redoState = new Circuit();
-        *redoState = *currentCircuit;
-        redoStack.push_back(redoState);
-
-        // Restore from undo stack
-        delete currentCircuit;
-        currentCircuit = new Circuit(*undoStack.back());
-        undoStack.pop_back();
-
-        // Recalculate node positions
-        calculateNodePositions(*currentCircuit);
-    }
-}
-
-void redo(Circuit*& currentCircuit) {
-    if (!redoStack.empty()) {
-        // Save current state to undo stack
-        Circuit* undoState = new Circuit();
-        *undoState = *currentCircuit;
-        undoStack.push_back(undoState);
-
-        // Restore from redo stack
-        delete currentCircuit;
-        currentCircuit = new Circuit(*redoStack.back());
-        redoStack.pop_back();
-
-        // Recalculate node positions
-        calculateNodePositions(*currentCircuit);
-    }
-}
-
 void plotTransientSignals(SDL_Renderer* renderer, const vector<double>& times,
                           const vector<double>& values, const SDL_Rect& area,
                           const string& title, SDL_Color color) {
@@ -3833,7 +3918,7 @@ int main(int argc, char* argv[]) {
                     if (x >= editMenuRect.x + 10 && x <= editMenuRect.x + 130) {
                         if (y >= editMenuRect.y + 40 && y <= editMenuRect.y + 70) { // Undo
                             if (!undoStack.empty()) {
-                                saveUndoState(circuit); // Current state becomes redo
+                                saveUndoState(circuit);
                                 undo(circuit);
                             }
                             EditMenu = false;
@@ -3845,7 +3930,6 @@ int main(int argc, char* argv[]) {
                             }
                             EditMenu = false;
                         }
-                            // In the mouse button down event handling for edit menu:
                         else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) { // Delete
                             if (selectedComponent) {
                                 saveUndoState(circuit);
@@ -4026,7 +4110,6 @@ int main(int argc, char* argv[]) {
                     inputText = "";
                 }
             }
-                // In your event handling section
             else if (event.type == SDL_MOUSEWHEEL) {
                 // Zoom with mouse wheel (Ctrl for vertical zoom only)
                 if (SDL_GetModState() & KMOD_CTRL) {
@@ -4062,8 +4145,6 @@ int main(int argc, char* argv[]) {
             else if (event.type == SDL_TEXTINPUT && textInputActive) {
                 inputText += event.text.text;
             }
-
-                // Add to your event handling:
             else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_RIGHT) {
                 int x, y;
                 SDL_GetMouseState(&x, &y);
@@ -4198,13 +4279,10 @@ int main(int argc, char* argv[]) {
         SDL_RenderDrawRect(renderer, &plotArea);
 
         // Draw the circuit
-        // Draw the circuit
         if (circuit) {
             drawCircuit(*circuit, renderer);
         }
 
-// Draw plots if we have data
-        // Replace your old plot drawing code with:
         if (!plotSignals.empty()) {
             drawLTspiceStylePlot(renderer, plotArea);
 
@@ -4218,7 +4296,6 @@ int main(int argc, char* argv[]) {
         drawToolbar(renderer);
 
         // Draw text boxes
-
         renderTextBox(node1Box);
         renderTextBox(node2Box);
         renderTextBox(valueBox);
@@ -4294,6 +4371,12 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
+    for (auto circuit : undoStack) {
+        delete circuit;
+    }
+    for (auto circuit : redoStack) {
+        delete circuit;
+    }
     TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
