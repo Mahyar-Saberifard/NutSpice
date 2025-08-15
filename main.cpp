@@ -240,8 +240,11 @@ enum PlacementMode {
 };
 
 void drawWire(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, SDL_Color color) {
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-    SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    // Only draw if points are different
+    if (x1 != x2 || y1 != y2) {
+        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+    }
 }
 
 PlacementMode currentPlacementMode = PLACE_NONE;
@@ -258,9 +261,12 @@ int getOrCreateNode(const string& nodeName) {
     if (nodeName == "GND" || nodeName == "0") return 0;
 
     if (nodeMap.find(nodeName) == nodeMap.end()) {
-        nodeMap[nodeName] = nextNodeNumber;
-        reverseNodeMap[nextNodeNumber] = nodeName;
-        return nextNodeNumber++;
+        int newNodeNum = nextNodeNumber++;
+        nodeMap[nodeName] = newNodeNum;
+        reverseNodeMap[newNodeNum] = nodeName;
+        // Initialize position for new node
+        nodePositions[newNodeNum] = {100 + (newNodeNum * 100), 100};
+        return newNodeNum;
     }
     return nodeMap[nodeName];
 }
@@ -1088,20 +1094,24 @@ public:
 
 };
 
-void Circuit::calculateNodePositions() {
+void Circuit::calculateNodePositions(){
     nodePositions.clear();
 
-    int xSpacing = 100;
-    int yPos = 100;
-    int xStart = 100;
+    // Position ground at bottom center
+    nodePositions[0] = {circuitArea.x + circuitArea.w/2, circuitArea.y + circuitArea.h - 50};
 
-    for (const auto& node : nodeMap) {
-        int nodeNum = node.second;
-        nodePositions[nodeNum] = {xStart + (nodeNum * xSpacing), yPos};
-    }
+    // Position other nodes in a grid
+    int x = circuitArea.x + 100;
+    int y = circuitArea.y + 100;
+    int nodesPerRow = 5;
 
-    if (nodeMap.count("GND") || nodeMap.count("0")) {
-        nodePositions[0] = {xStart, yPos + 100};  // Position ground below others
+    for (int i = 1; i < nextNodeNumber; i++) {
+        nodePositions[i] = {x, y};
+        x += 150;
+        if (i % nodesPerRow == 0) {
+            x = circuitArea.x + 100;
+            y += 100;
+        }
     }
 }
 double Circuit::currentTimeStep = 0.0;
@@ -3222,10 +3232,10 @@ void drawDiodePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
 
     // Draw line
     SDL_RenderDrawLine(renderer,
-        midX + dx * triangleSize/2 + px * triangleSize/2,
-        midY + dy * triangleSize/2 + py * triangleSize/2,
-        midX + dx * triangleSize/2 - px * triangleSize/2,
-        midY + dy * triangleSize/2 - py * triangleSize/2);
+                       midX + dx * triangleSize/2 + px * triangleSize/2,
+                       midY + dy * triangleSize/2 + py * triangleSize/2,
+                       midX + dx * triangleSize/2 - px * triangleSize/2,
+                       midY + dy * triangleSize/2 - py * triangleSize/2);
 }
 
 void drawGroundPreview(SDL_Renderer* renderer, int x, int y) {
@@ -3269,7 +3279,7 @@ void handleComponentSelection(const Circuit* circuit, int x, int y) {
             y >= bounds.y && y <= bounds.y + bounds.h) {
             selectedComponent = comp;
             break;
-            }
+        }
     }
 }
 
@@ -3285,7 +3295,7 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
     if (isPlacingComponent) {
         if (currentPlacementMode == PLACE_WIRE) {
             int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
-            int node2 = findOrCreateNodeAt(x, y);
+            int node2 = (currentPlacementMode == PLACE_GROUND) ? 0 : findOrCreateNodeAt(x, y);
 
             if (node1 != node2) { // Prevent connecting node to itself
                 saveUndoState(circuit);
@@ -3377,7 +3387,6 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
         SDL_RenderFillRect(renderer, &nodeRect);
 
-        // Draw node label
         string label = (node.first == 0) ? "GND" : to_string(node.first);
         renderText(label, node.second.x + 12, node.second.y - 8, currentTheme.text);
     }
@@ -3393,25 +3402,25 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
             switch(currentPlacementMode) {
                 case PLACE_RESISTOR:
                     drawResistorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                break;
+                    break;
                 case PLACE_CAPACITOR:
                     drawCapacitorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                break;
+                    break;
                 case PLACE_INDUCTOR:
                     drawInductorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                break;
+                    break;
                 case PLACE_VOLTAGE_SOURCE:
                     drawVoltageSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                break;
+                    break;
                 case PLACE_CURRENT_SOURCE:
                     drawCurrentSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                break;
+                    break;
                 case PLACE_DIODE:
                     drawDiodePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                break;
+                    break;
                 case PLACE_GROUND:
                     drawGroundPreview(renderer, mouseX, mouseY);
-                break;
+                    break;
                 default:
                     break;
             }
@@ -3424,7 +3433,7 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         SDL_Rect nodeRect = {pos.x - 5, pos.y - 5, 10, 10};
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
         SDL_RenderFillRect(renderer, &nodeRect);
-       // renderText(node.first, pos.x + 10, pos.y - 10, BLACK);   runTime error
+        // renderText(node.first, pos.x + 10, pos.y - 10, BLACK);   runTime error
     }
 }
 
@@ -3840,7 +3849,7 @@ int main(int argc, char* argv[]) {
                     if (currentPlacementMode != PLACE_NONE) {
                         handleComponentPlacement(circuit, x, y);
                     }
-                    // Otherwise handle selection
+                        // Otherwise handle selection
                     else {
                         handleComponentSelection(circuit, x, y);
                     }
