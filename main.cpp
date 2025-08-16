@@ -28,8 +28,6 @@ using namespace std;
 #define MAX_PATH PATH_MAX
 #endif
 
-
-
 struct PlotSignal {
     vector<double> time;
     vector<double> values;
@@ -107,7 +105,7 @@ bool showShortcutHelp = false;
 
 double tStep = 0.001;
 double tStop = 0.1;
-std::map<int, SDL_Point> nodePositions;
+map<int, SDL_Point> nodePositions;
 
 SDL_Window* window = nullptr;
 SDL_Renderer* renderer = nullptr;
@@ -119,7 +117,7 @@ const SDL_Color BLACK = {0, 0, 0, 255};
 const SDL_Color RED = {220, 0, 0, 255};
 const SDL_Color GREEN = {0, 200, 0, 255};
 const SDL_Color BLUE = {0, 0, 220, 255};
-const SDL_Color currentThemebutton = {200, 200, 200, 255};
+const SDL_Color GRAY = {200, 200, 200, 255};
 
 TTF_Font* font = nullptr;
 
@@ -159,23 +157,23 @@ struct ThemeColors {
 };
 
 ThemeColors lightTheme = {
-        {240, 240, 240, 255},  // background
-        {0, 0, 0, 255},         // text
-        {255, 255, 255, 255},   // circuitBg
-        {255, 255, 255, 255},   // plotBg
-        {200, 200, 200, 255},   // button
-        {0, 0, 0, 255},         // buttonText
-        {180, 180, 180, 255}    // toolbar
+        {240, 240, 240, 255},
+        {0, 0, 0, 255},
+        {255, 255, 255, 255},
+        {255, 255, 255, 255},
+        {200, 200, 200, 255},
+        {0, 0, 0, 255},
+        {180, 180, 180, 255}
 };
 
 ThemeColors darkTheme = {
-        {40, 40, 40, 255},      // background
-        {220, 220, 220, 255},   // text
-        {60, 60, 60, 255},      // circuitBg
-        {60, 60, 60, 255},      // plotBg
-        {80, 80, 80, 255},      // button
-        {220, 220, 220, 255},   // buttonText
-        {50, 50, 50, 255}       // toolbar
+        {40, 40, 40, 255},
+        {220, 220, 220, 255},
+        {60, 60, 60, 255},
+        {60, 60, 60, 255},
+        {80, 80, 80, 255},
+        {220, 220, 220, 255},
+        {50, 50, 50, 255}
 };
 
 ThemeColors currentTheme = lightTheme;
@@ -240,7 +238,6 @@ enum PlacementMode {
 };
 
 void drawWire(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, SDL_Color color) {
-    // Only draw if points are different
     if (x1 != x2 || y1 != y2) {
         SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
         SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
@@ -264,7 +261,6 @@ int getOrCreateNode(const string& nodeName) {
         int newNodeNum = nextNodeNumber++;
         nodeMap[nodeName] = newNodeNum;
         reverseNodeMap[newNodeNum] = nodeName;
-        // Initialize position for new node
         nodePositions[newNodeNum] = {100 + (newNodeNum * 100), 100};
         return newNodeNum;
     }
@@ -341,13 +337,16 @@ protected:
 public:
     ComponentType type;
     string name;
-    std::string nodeName1;
-    std::string nodeName2;
+    string nodeName1;
+    string nodeName2;
     int node1, node2;
     double value;
 
     Component(ComponentType t, const string& n, int n1, int n2, double val)
-            : type(t), name(n), node1(n1), node2(n2), value(val) {}
+        : type(t), name(n), node1(n1), node2(n2), value(val) {
+        nodeName1 = getNodeName(n1);
+        nodeName2 = getNodeName(n2);
+    }
 
     virtual ~Component() {}
 
@@ -384,15 +383,14 @@ public:
         posX = x;
         posY = y;
     }
-    virtual std::pair<int,int> getPosition() {
+    virtual pair<int,int> getPosition() {
         return {posX, posY};
     }
 
-    virtual std::string getType() = 0;
+    virtual string getType() = 0;
 
     virtual void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const = 0;
     virtual SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const = 0;
-    // Add this to Component base class:
     virtual Component* clone() const = 0;
 
 };
@@ -404,52 +402,43 @@ public:
     static double currentTimeStep;
     static double currentTime;
     vector<pair<int, int>> wireConnections;
-    std::map<int, SDL_Point> nodePositions;
-    std::unordered_map<std::string, int> nodeMap;
-    std::unordered_map<int, std::string> reverseNodeMap;
+    map<int, SDL_Point> nodePositions;
+    unordered_map<string, int> nodeMap;
+    unordered_map<int, string> reverseNodeMap;
     int nextNodeNumber = 1;
 
     Circuit(const Circuit& other) {
-        // Copy components
         for (const auto& comp : other.components) {
             components.push_back(comp->clone());
         }
 
-        // Copy node information
         nodeMap = other.nodeMap;
         reverseNodeMap = other.reverseNodeMap;
         nextNodeNumber = other.nextNodeNumber;
         maxNode = other.maxNode;
 
-        // Copy wires
         wireConnections = other.wireConnections;
 
-        // Copy node positions
         nodePositions = other.nodePositions;
     }
 
     Circuit() : maxNode(0){}
 
-    // Clone method for polymorphic copying
     Circuit* clone() const {
         return new Circuit(*this);
     }
 
-    // Assignment operator
     Circuit& operator=(const Circuit& other) {
         if (this != &other) {
-            // Clear current state
             for (auto comp : components) {
                 delete comp;
             }
             components.clear();
 
-            // Copy components
             for (const auto& comp : other.components) {
                 components.push_back(comp->clone());
             }
 
-            // Copy other members
             nodeMap = other.nodeMap;
             reverseNodeMap = other.reverseNodeMap;
             nextNodeNumber = other.nextNodeNumber;
@@ -467,17 +456,14 @@ public:
     }
 
     void updateNodePositions() {
-        // Simple layout - arrange nodes horizontally with ground at bottom
         int x = 100;
         int y = 100;
         int groundY = 500;
 
         nodePositions.clear();
 
-        // Position ground node
         nodePositions[0] = {100, groundY};
 
-        // Position other nodes
         for (int i = 1; i < nextNodeNumber; i++) {
             nodePositions[i] = {x, y};
             x += 100;
@@ -488,15 +474,14 @@ public:
         }
     }
 
-    int getOrCreateNode(const std::string& name) {
-        if (name == "GND" || name == "0") return 0;  // Ground is always node 0
+    int getOrCreateNode(const string& name) {
+        if (name == "GND" || name == "0") return 0;
 
         auto it = nodeMap.find(name);
         if (it != nodeMap.end()) {
             return it->second;
         }
 
-        // Assign new node number
         int nodeNum = nextNodeNumber++;
         nodeMap[name] = nodeNum;
         reverseNodeMap[nodeNum] = name;
@@ -512,11 +497,41 @@ public:
         return "UNKNOWN";
     }
 
-    const std::unordered_map<std::string, int>& getNodeMap() const {
+    void updateNodeConnections() {
+        unordered_set<int> connectedNodes;
+        connectedNodes.insert(0);
+
+        for (const auto& comp : components) {
+            connectedNodes.insert(comp->node1);
+            connectedNodes.insert(comp->node2);
+        }
+
+        unordered_map<string, int> newNodeMap;
+        unordered_map<int, string> newReverseNodeMap;
+        int newNextNode = 1;
+
+        for (const auto& node : nodeMap) {
+            if (connectedNodes.count(node.second)) {
+                newNodeMap[node.first] = (node.second == 0) ? 0 : newNextNode++;
+                newReverseNodeMap[newNodeMap[node.first]] = node.first;
+            }
+        }
+
+        for (auto& comp : components) {
+            comp->node1 = newNodeMap[reverseNodeMap[comp->node1]];
+            comp->node2 = newNodeMap[reverseNodeMap[comp->node2]];
+        }
+
+        nodeMap = newNodeMap;
+        reverseNodeMap = newReverseNodeMap;
+        nextNodeNumber = newNextNode;
+    }
+
+    const unordered_map<string, int>& getNodeMap() const {
         return nodeMap;
     }
 
-    const std::unordered_map<int, std::string>& getReverseNodeMap() const {
+    const unordered_map<int, string>& getReverseNodeMap() const {
         return reverseNodeMap;
     }
 
@@ -557,7 +572,6 @@ public:
             throw runtime_error("Error: Component " + comp->name + " already exists in the circuit");
         }
 
-        // Convert node names to numbers
         comp->node1 = getOrCreateNode(comp->nodeName1);
         comp->node2 = getOrCreateNode(comp->nodeName2);
 
@@ -585,49 +599,11 @@ public:
                 delete *it;
                 components.erase(it);
 
-                // Check if any nodes became disconnected and remove them
                 updateNodeConnections();
                 return true;
             }
         }
         return false;
-    }
-
-    void updateNodeConnections() {
-        // Create a set of all nodes that are still connected
-        std::unordered_set<int> connectedNodes;
-        connectedNodes.insert(0); // Keep ground
-
-        for (const auto& comp : components) {
-            connectedNodes.insert(comp->node1);
-            connectedNodes.insert(comp->node2);
-        }
-
-        // Update node maps to only include connected nodes
-        std::unordered_map<std::string, int> newNodeMap;
-        std::unordered_map<int, std::string> newReverseNodeMap;
-        int newNextNode = 1;
-
-        for (const auto& node : nodeMap) {
-            if (connectedNodes.count(node.second)) {
-                newNodeMap[node.first] = (node.second == 0) ? 0 : newNextNode++;
-                newReverseNodeMap[newNodeMap[node.first]] = node.first;
-            }
-        }
-
-        // Update component node references
-        for (auto& comp : components) {
-            comp->node1 = newNodeMap[reverseNodeMap[comp->node1]];
-            comp->node2 = newNodeMap[reverseNodeMap[comp->node2]];
-        }
-
-        // Update global node tracking
-        nodeMap = newNodeMap;
-        reverseNodeMap = newReverseNodeMap;
-        nextNodeNumber = newNextNode;
-
-        // Recalculate node positions
-        calculateNodePositions();
     }
 
     void calculateNodePositions();
@@ -731,6 +707,10 @@ public:
     }
 
     void analyzeDC() {
+        if (!hasGround()) {
+            throw runtime_error("Error: No ground node detected in the circuit");
+        }
+
         int numNodes = maxNode;
         int numVSources = 0;
         int numInductors = 0;
@@ -820,6 +800,13 @@ public:
 
         } catch (const runtime_error& e) {
             cerr << "Error in DC analysis: " << e.what() << endl;
+            cerr << "Matrix A:\n";
+            for (int i = 0; i < numVars; i++) {
+                for (int j = 0; j < numVars; j++) {
+                    cerr << A[i][j] << " ";
+                }
+                cerr << " | " << b[i] << endl;
+            }
         }
     }
 
@@ -888,7 +875,6 @@ public:
 
                 x = solveSystem(A, b);
 
-                // Store node voltages with their times
                 for (int node = 1; node <= numNodes; node++) {
                     if (node >= plotSignals.size()) {
                         plotSignals.push_back({vector<double>(), vector<double>(),
@@ -901,7 +887,6 @@ public:
                     plotSignals[node-1].values.push_back(x[node-1]);
                 }
 
-                // Store component currents
                 for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
                     auto comp = components[compIdx];
                     if (comp->type == RESISTOR || comp->type == CAPACITOR ||
@@ -1097,10 +1082,8 @@ public:
 void Circuit::calculateNodePositions(){
     nodePositions.clear();
 
-    // Position ground at bottom center
     nodePositions[0] = {circuitArea.x + circuitArea.w/2, circuitArea.y + circuitArea.h - 50};
 
-    // Position other nodes in a grid
     int x = circuitArea.x + 100;
     int y = circuitArea.y + 100;
     int nodesPerRow = 5;
@@ -1162,7 +1145,7 @@ bool saveCircuitToFile(const Circuit& circuit, const string& filename) {
     return true;
 }
 
-void renderText(const std::string& text, int x, int y,  SDL_Color color = currentTheme.text) {
+void renderText(const string& text, int x, int y,  SDL_Color color = currentTheme.text) {
     SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_Rect rect = {x, y, surface->w, surface->h};
@@ -1194,7 +1177,7 @@ SDL_Point getNodePosition(int node) {
     if (it != nodePositions.end()) {
         return it->second;
     }
-    return {0, 0}; // Default position if node not found
+    return {0, 0};
 }
 
 class Resistor : public Component {
@@ -1262,7 +1245,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1360,7 +1342,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1463,7 +1444,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1510,7 +1490,7 @@ public:
 
         double vd = lastVoltage;
 
-        double expArg = std::min(vd / (n * Vt), 40.0);
+        double expArg = min(vd / (n * Vt), 40.0);
         double expVd = exp(expArg);
 
         double g = (Is / (n * Vt)) * expVd;
@@ -1541,7 +1521,7 @@ public:
         double v2 = (node2 == 0) ? 0.0 : nodeVoltages[node2 - 1];
         lastVoltage = v1 - v2;
 
-        double expArg = std::min(lastVoltage / (n * Vt), 40.0);
+        double expArg = min(lastVoltage / (n * Vt), 40.0);
         current = Is * (exp(expArg) - 1);
     }
 
@@ -1585,7 +1565,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1648,7 +1627,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1725,7 +1703,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1817,7 +1794,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1919,7 +1895,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -1990,7 +1965,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -2077,7 +2051,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -2173,7 +2146,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -2253,7 +2225,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -2337,7 +2308,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -2411,7 +2381,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -2489,7 +2458,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        // Draw component name
         int midX = (p1.x + p2.x)/2 + px * amplitude*2;
         int midY = (p1.y + p2.y)/2 + py * amplitude*2;
         renderText(name, midX, midY, currentTheme.text);
@@ -2657,7 +2625,7 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
                     circuit.addComponent(new Diode(name, n1, n2));
                     break;
                 }
-                case 'E': { // VCVS
+                case 'E': {
                     string cn1, cn2, gainStr;
                     if (!(iss >> cn1 >> cn2 >> gainStr)) {
                         cerr << "Error: Invalid VCVS parameters" << endl;
@@ -2669,7 +2637,7 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
                     circuit.addComponent(new VCVS(name, n1, n2, ctrlNode1, ctrlNode2, gain));
                     break;
                 }
-                case 'G': { // VCCS
+                case 'G': {
                     string cn1, cn2, gmStr;
                     if (!(iss >> cn1 >> cn2 >> gmStr)) {
                         cerr << "Error: Invalid VCCS parameters" << endl;
@@ -2681,7 +2649,7 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
                     circuit.addComponent(new VCCS(name, n1, n2, ctrlNode1, ctrlNode2, gm));
                     break;
                 }
-                case 'H': { // CCVS
+                case 'H': {
                     string vsName, gainStr;
                     if (!(iss >> vsName >> gainStr)) {
                         cerr << "Error: Invalid CCVS parameters" << endl;
@@ -2691,7 +2659,7 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
                     circuit.addComponent(new CCVS(name, n1, n2, vsName, gain));
                     break;
                 }
-                case 'F': { // CCCS
+                case 'F': {
                     string vsName, gainStr;
                     if (!(iss >> vsName >> gainStr)) {
                         cerr << "Error: Invalid CCCS parameters" << endl;
@@ -2727,31 +2695,31 @@ void resetGlobalState() {
 
 bool initSDL() {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
+        cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << endl;
         return false;
     }
 
     if (TTF_Init() == -1) {
-        std::cerr << "SDL_ttf could not initialize! TTF_Error: " << TTF_GetError() << std::endl;
+        cerr << "SDL_ttf could not initialize! TTF_Error: " << TTF_GetError() << endl;
         return false;
     }
 
     window = SDL_CreateWindow("Circuit Simulator", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                               SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     if (!window) {
-        std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << std::endl;
+        cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << endl;
         return false;
     }
 
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
-        std::cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << std::endl;
+        cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << endl;
         return false;
     }
 
     font = TTF_OpenFont("C:\\Windows\\Fonts\\consola.ttf", 24);
     if (!font) {
-        std::cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << std::endl;
+        cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << endl;
         return false;
     }
 
@@ -2776,19 +2744,16 @@ vector<Circuit*> redoStack;
 string copiedComponent;
 
 void saveUndoState(Circuit*& currentCircuit) {
-    // Clear redo stack when making new changes
     for (auto circuit : redoStack) {
         delete circuit;
     }
     redoStack.clear();
 
-    // Create a deep copy including node positions
     Circuit* copy = new Circuit(*currentCircuit);
-    copy->nodePositions = currentCircuit->nodePositions; // Copy node positions
+    copy->nodePositions = currentCircuit->nodePositions;
 
     undoStack.push_back(copy);
 
-    // Limit undo stack size
     if (undoStack.size() > 20) {
         delete undoStack.front();
         undoStack.erase(undoStack.begin());
@@ -2797,12 +2762,10 @@ void saveUndoState(Circuit*& currentCircuit) {
 
 void undo(Circuit*& currentCircuit) {
     if (!undoStack.empty()) {
-        // Save current state to redo stack
         Circuit* redoState = new Circuit(*currentCircuit);
         redoState->nodePositions = currentCircuit->nodePositions;
         redoStack.push_back(redoState);
 
-        // Restore from undo stack
         delete currentCircuit;
         currentCircuit = new Circuit(*undoStack.back());
         currentCircuit->nodePositions = undoStack.back()->nodePositions;
@@ -2812,12 +2775,10 @@ void undo(Circuit*& currentCircuit) {
 
 void redo(Circuit*& currentCircuit) {
     if (!redoStack.empty()) {
-        // Save current state to undo stack
         Circuit* undoState = new Circuit(*currentCircuit);
         undoState->nodePositions = currentCircuit->nodePositions;
         undoStack.push_back(undoState);
 
-        // Restore from redo stack
         delete currentCircuit;
         currentCircuit = new Circuit(*redoStack.back());
         currentCircuit->nodePositions = redoStack.back()->nodePositions;
@@ -2834,11 +2795,11 @@ void showAnalysisSettings(SDL_Renderer* renderer) {
     renderText("Analysis Settings", analysisWindow.x + 20, analysisWindow.y + 20, currentTheme.text);
 
     renderText("Time Step (s):", analysisWindow.x + 20, analysisWindow.y + 60, currentTheme.text);
-    TextBox stepBox = {analysisWindow.x + 150, analysisWindow.y + 60, 150, 30, std::to_string(tStep)};
+    TextBox stepBox = {analysisWindow.x + 150, analysisWindow.y + 60, 150, 30, to_string(tStep)};
     renderTextBox(stepBox);
 
     renderText("Stop Time (s):", analysisWindow.x + 20, analysisWindow.y + 110, currentTheme.text);
-    TextBox stopBox = {analysisWindow.x + 150, analysisWindow.y + 110, 150, 30, std::to_string(tStop)};
+    TextBox stopBox = {analysisWindow.x + 150, analysisWindow.y + 110, 150, 30, to_string(tStop)};
     renderTextBox(stopBox);
 
     Button runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40, "Run", GREEN};
@@ -2915,29 +2876,29 @@ void showComponentProperties(SDL_Renderer* renderer, Component* component) {
 
     SDL_Rect propWindow = {600, 100, 350, 400};
 
-    SDL_SetRenderDrawColor(renderer, 230, 250, 230, 255);
+    SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
     SDL_RenderFillRect(renderer, &propWindow);
 
-    renderText("Component Properties", propWindow.x + 20, propWindow.y + 20, BLACK);
+    renderText("Component Properties", propWindow.x + 20, propWindow.y + 20, currentTheme.text);
 
-    //renderText("Type: " + component->getTypeString(), propWindow.x + 20, propWindow.y + 60, BLACK);
-    renderText("Name: " + component->name, propWindow.x + 20, propWindow.y + 90, BLACK);
+    renderText("Type: " + component->getType(), propWindow.x + 20, propWindow.y + 60, currentTheme.text);
+    renderText("Name: " + component->name, propWindow.x + 20, propWindow.y + 90, currentTheme.text);
 
-    renderText("Connections:", propWindow.x + 20, propWindow.y + 120, BLACK);
-    renderText("Node 1: " + getNodeName(component->node1), propWindow.x + 40, propWindow.y + 150, BLACK);
-    renderText("Node 2: " + getNodeName(component->node2), propWindow.x + 40, propWindow.y + 180, BLACK);
+    renderText("Connections:", propWindow.x + 20, propWindow.y + 120, currentTheme.text);
+    renderText("Node 1: " + getNodeName(component->node1), propWindow.x + 40, propWindow.y + 150, currentTheme.text);
+    renderText("Node 2: " + getNodeName(component->node2), propWindow.x + 40, propWindow.y + 180, currentTheme.text);
 
     if (component->type != GROUND && component->type != DIODE) {
-        renderText("Value:", propWindow.x + 20, propWindow.y + 210, BLACK);
-        TextBox valueBox = {propWindow.x + 100, propWindow.y + 210, 150, 30, std::to_string(component->value)};
+        renderText("Value:", propWindow.x + 20, propWindow.y + 210, currentTheme.text);
+        TextBox valueBox = {propWindow.x + 100, propWindow.y + 210, 150, 30, to_string(component->value)};
         renderTextBox(valueBox);
     }
 
     if (component->type == SIN_VOLTAGE_SOURCE || component->type == SIN_CURRENT_SOURCE) {
-        //SinSource* src = dynamic_cast<SinSource*>(component);
-        renderText("Amplitude:", propWindow.x + 20, propWindow.y + 250, BLACK);
-        //TextBox ampBox = {propWindow.x + 120, propWindow.y + 250, 150, 30, std::to_string(src->amplitude)};
-        //renderTextBox(ampBox);
+        SinVoltageSource* src = dynamic_cast<SinVoltageSource*>(component);
+        renderText("Amplitude:", propWindow.x + 20, propWindow.y + 250, currentTheme.text);
+        TextBox ampBox = {propWindow.x + 120, propWindow.y + 250, 150, 30, to_string(src->value)};
+        renderTextBox(ampBox);
     }
 
     Button saveBtn = {propWindow.x + 50, propWindow.y + 320, 100, 40, "Save", GREEN};
@@ -3031,23 +2992,6 @@ void handleLoadButton(Circuit*& circuit, string& currentCircuitFile) {
     cout << "Reloaded circuit from " << currentCircuitFile << endl;
 }
 
-void calculateNodePositions(const Circuit& circuit) {
-    nodePositions.clear();
-
-    int xSpacing = 100;
-    int yPos = 100;
-    int xStart = 100;
-
-    for (const auto& node : circuit.getNodeMap()) {
-        int nodeNum = node.second;
-        nodePositions[nodeNum] = {xStart + (nodeNum * xSpacing), yPos};
-    }
-
-    if (circuit.getNodeMap().count("GND") || circuit.getNodeMap().count("0")) {
-        nodePositions[0] = {xStart, yPos + 100};  // Position ground below others
-    }
-}
-
 void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
                             int& outX1, int& outY1, int& outX2, int& outY2) {
     int dx = x2 - x1;
@@ -3094,7 +3038,6 @@ void drawResistorPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2)
 void drawCapacitorPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     const int gap = 12;
 
-    // Calculate perpendicular points
     float dx = x2 - x1;
     float dy = y2 - y1;
     float length = sqrt(dx*dx + dy*dy);
@@ -3103,7 +3046,6 @@ void drawCapacitorPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2
     float px = -dy;
     float py = dx;
 
-    // Draw plates
     SDL_Point plate1[2], plate2[2];
     plate1[0].x = x1 + dx * (length/2 - gap) + px * gap/2;
     plate1[0].y = y1 + dy * (length/2 - gap) + py * gap/2;
@@ -3167,7 +3109,6 @@ void drawVoltageSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, in
     SDL_RenderDrawLine(renderer, x1, y1, centerX - radius, centerY);
     SDL_RenderDrawLine(renderer, centerX + radius, centerY, x2, y2);
 
-    // Draw circle
     for (int angle = 0; angle < 360; angle += 10) {
         float rad = angle * M_PI / 180.0f;
         int x = centerX + radius * cos(rad);
@@ -3175,7 +3116,6 @@ void drawVoltageSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, in
         SDL_RenderDrawPoint(renderer, x, y);
     }
 
-    // Draw plus sign
     SDL_RenderDrawLine(renderer, centerX-5, centerY, centerX+5, centerY);
     SDL_RenderDrawLine(renderer, centerX, centerY-5, centerX, centerY+5);
 }
@@ -3189,7 +3129,6 @@ void drawCurrentSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, in
     SDL_RenderDrawLine(renderer, x1, y1, centerX - radius, centerY);
     SDL_RenderDrawLine(renderer, centerX + radius, centerY, x2, y2);
 
-    // Draw circle
     for (int angle = 0; angle < 360; angle += 10) {
         float rad = angle * M_PI / 180.0f;
         int x = centerX + radius * cos(rad);
@@ -3197,7 +3136,6 @@ void drawCurrentSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, in
         SDL_RenderDrawPoint(renderer, x, y);
     }
 
-    // Draw arrow
     SDL_RenderDrawLine(renderer, centerX, centerY-8, centerX, centerY+8);
     SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX-5, centerY+3);
     SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX+5, centerY+3);
@@ -3221,7 +3159,6 @@ void drawDiodePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     SDL_RenderDrawLine(renderer, x1, y1, midX - dx * triangleSize, midY - dy * triangleSize);
     SDL_RenderDrawLine(renderer, midX + dx * triangleSize, midY + dy * triangleSize, x2, y2);
 
-    // Draw triangle
     SDL_Point triangle[4];
     triangle[0] = {int(midX - dx * triangleSize), int(midY - dy * triangleSize)};
     triangle[1] = {int(midX + px * triangleSize), int(midY + py * triangleSize)};
@@ -3230,7 +3167,6 @@ void drawDiodePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
 
     SDL_RenderDrawLines(renderer, triangle, 4);
 
-    // Draw line
     SDL_RenderDrawLine(renderer,
                        midX + dx * triangleSize/2 + px * triangleSize/2,
                        midY + dy * triangleSize/2 + py * triangleSize/2,
@@ -3244,7 +3180,6 @@ void drawGroundPreview(SDL_Renderer* renderer, int x, int y) {
     SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
     SDL_RenderDrawLine(renderer, x, y, x, y + size);
 
-    // Draw horizontal lines
     SDL_RenderDrawLine(renderer, x - size, y + size, x + size, y + size);
     SDL_RenderDrawLine(renderer, x - size/2, y + size*1.5, x + size/2, y + size*1.5);
     SDL_RenderDrawLine(renderer, x - size/4, y + size*2, x + size/4, y + size*2);
@@ -3253,7 +3188,6 @@ void drawGroundPreview(SDL_Renderer* renderer, int x, int y) {
 int findOrCreateNodeAt(int x, int y) {
     const int NODE_PROXIMITY_THRESHOLD = 15;
 
-    // First check if we're near an existing node
     for (const auto& node : nodePositions) {
         int dx = x - node.second.x;
         int dy = y - node.second.y;
@@ -3262,12 +3196,30 @@ int findOrCreateNodeAt(int x, int y) {
         }
     }
 
-    // If not, create a new node
     int newNode = nextNodeNumber++;
     nodePositions[newNode] = {x, y};
     reverseNodeMap[newNode] = to_string(newNode);
     nodeMap[to_string(newNode)] = newNode;
     return newNode;
+}
+
+void calculateNodePositions(const Circuit& circuit) {
+    nodePositions.clear();
+
+    nodePositions[0] = {circuitArea.x + circuitArea.w/2, circuitArea.y + circuitArea.h - 50};
+
+    int x = circuitArea.x + 100;
+    int y = circuitArea.y + 100;
+    int nodesPerRow = 5;
+
+    for (int i = 1; i < circuit.nextNodeNumber; i++) {
+        nodePositions[i] = {x, y};
+        x += 150;
+        if (i % nodesPerRow == 0) {
+            x = circuitArea.x + 100;
+            y += 100;
+        }
+    }
 }
 
 void handleComponentSelection(const Circuit* circuit, int x, int y) {
@@ -3295,9 +3247,9 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
     if (isPlacingComponent) {
         if (currentPlacementMode == PLACE_WIRE) {
             int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
-            int node2 = (currentPlacementMode == PLACE_GROUND) ? 0 : findOrCreateNodeAt(x, y);
+            int node2 = findOrCreateNodeAt(x, y);
 
-            if (node1 != node2) { // Prevent connecting node to itself
+            if (node1 != node2) {
                 saveUndoState(circuit);
                 circuit->addWire(node1, node2);
                 cout << "Created wire between node " << node1 << " and " << node2 << endl;
@@ -3311,40 +3263,57 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
             int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
             int node2 = (currentPlacementMode == PLACE_GROUND) ? 0 : findOrCreateNodeAt(x, y);
 
-            if (node1 != node2 || currentPlacementMode == PLACE_GROUND) { // Prevent connecting node to itself
+            if (node1 != node2 || currentPlacementMode == PLACE_GROUND) {
+                string node1Name = getNodeName(node1);
+                string node2Name = getNodeName(node2);
+
                 switch(currentPlacementMode) {
                     case PLACE_RESISTOR:
                         name = "R" + to_string(compCount++);
                         if (value <= 0) value = 1000.0;
                         newComp = new Resistor(name, node1, node2, value);
+                        newComp->nodeName1 = node1Name;
+                        newComp->nodeName2 = node2Name;
                         break;
                     case PLACE_CAPACITOR:
                         name = "C" + to_string(compCount++);
                         if (value <= 0) value = 1e-6;
                         newComp = new Capacitor(name, node1, node2, value);
+                        newComp->nodeName1 = node1Name;
+                        newComp->nodeName2 = node2Name;
                         break;
                     case PLACE_INDUCTOR:
                         name = "L" + to_string(compCount++);
                         if (value <= 0) value = 1e-3;
                         newComp = new Inductor(name, node1, node2, value);
+                        newComp->nodeName1 = node1Name;
+                        newComp->nodeName2 = node2Name;
                         break;
                     case PLACE_VOLTAGE_SOURCE:
                         name = "V" + to_string(compCount++);
                         if (value <= 0) value = 5.0;
                         newComp = new VoltageSource(name, node1, node2, value);
+                        newComp->nodeName1 = node1Name;
+                        newComp->nodeName2 = node2Name;
                         break;
                     case PLACE_CURRENT_SOURCE:
                         name = "I" + to_string(compCount++);
                         if (value <= 0) value = 0.1;
                         newComp = new CurrentSource(name, node1, node2, value);
+                        newComp->nodeName1 = node1Name;
+                        newComp->nodeName2 = node2Name;
                         break;
                     case PLACE_DIODE:
                         name = "D" + to_string(compCount++);
                         newComp = new Diode(name, node1, node2);
+                        newComp->nodeName1 = node1Name;
+                        newComp->nodeName2 = node2Name;
                         break;
                     case PLACE_GROUND:
                         name = "GND" + to_string(compCount++);
                         newComp = new Ground(name, node1);
+                        newComp->nodeName1 = node1Name;
+                        newComp->nodeName2 = node2Name;
                         break;
                     default:
                         break;
@@ -3371,17 +3340,14 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         drawWire(renderer, p1.x, p1.y, p2.x, p2.y, currentTheme.text);
     }
 
-    // Draw all components
     for (const auto& comp : circuit.getComponents()) {
         comp->render(renderer, nodePositions);
     }
 
-    // Draw all components
     for (const auto& comp : circuit.getComponents()) {
         comp->render(renderer, nodePositions);
     }
 
-    // Draw all nodes
     for (const auto& node : nodePositions) {
         SDL_Rect nodeRect = {node.second.x - 5, node.second.y - 5, 10, 10};
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
@@ -3391,7 +3357,6 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         renderText(label, node.second.x + 12, node.second.y - 8, currentTheme.text);
     }
 
-    // In your drawing code where you handle placement preview:
     if (isPlacingComponent) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
@@ -3433,20 +3398,18 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         SDL_Rect nodeRect = {pos.x - 5, pos.y - 5, 10, 10};
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
         SDL_RenderFillRect(renderer, &nodeRect);
-        // renderText(node.first, pos.x + 10, pos.y - 10, BLACK);   runTime error
+        renderText(node.first, pos.x + 10, pos.y - 10, currentTheme.text);
     }
 }
 
 void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
     if (plotSignals.empty()) return;
 
-    // Draw background
     SDL_SetRenderDrawColor(renderer, currentTheme.plotBg.r, currentTheme.plotBg.g, currentTheme.plotBg.b, 255);
     SDL_RenderFillRect(renderer, &area);
     SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
     SDL_RenderDrawRect(renderer, &area);
 
-    // Find min/max time and values across all signals
     double minTime = plotSignals[0].time.empty() ? 0 : plotSignals[0].time[0];
     double maxTime = plotSignals[0].time.empty() ? 1 : plotSignals[0].time.back();
     double minValue = 0, maxValue = 1;
@@ -3462,7 +3425,6 @@ void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
         }
     }
 
-    // Add some padding
     double valueRange = maxValue - minValue;
     minValue -= valueRange * 0.1;
     maxValue += valueRange * 0.1;
@@ -3470,7 +3432,6 @@ void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
     double timeRange = maxTime - minTime;
     if (timeRange <= 0) timeRange = 1;
 
-    // Apply zoom and pan
     timeRange /= timeZoom;
     valueRange = (maxValue - minValue) / valueZoom;
     double centerTime = (minTime + maxTime) / 2 + timePan;
@@ -3480,11 +3441,9 @@ void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
     minValue = centerValue - valueRange/2;
     maxValue = centerValue + valueRange/2;
 
-    // Draw grid
     if (showGrid) {
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 50);
 
-        // Vertical grid lines
         double timeStep = pow(10, floor(log10(timeRange)));
         for (double t = ceil(minTime/timeStep)*timeStep; t <= maxTime; t += timeStep) {
             int x = area.x + static_cast<int>((t - minTime) / timeRange * area.w);
@@ -3492,7 +3451,6 @@ void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
             renderText(to_string(t).substr(0, 6), x + 2, area.y + area.h - 20, currentTheme.text);
         }
 
-        // Horizontal grid lines
         double valueStep = pow(10, floor(log10(valueRange)));
         for (double v = ceil(minValue/valueStep)*valueStep; v <= maxValue; v += valueStep) {
             int y = area.y + area.h - static_cast<int>((v - minValue) / valueRange * area.h);
@@ -3501,12 +3459,10 @@ void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
         }
     }
 
-    // Draw axes
     SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-    SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h); // X-axis
-    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h); // Y-axis
+    SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h);
+    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h);
 
-    // Draw signals
     for (const auto& sig : plotSignals) {
         if (sig.time.size() != sig.values.size() || sig.time.empty()) continue;
 
@@ -3522,7 +3478,6 @@ void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
         }
     }
 
-    // Draw legend if enabled
     if (showLegend) {
         int legendX = area.x + 10;
         int legendY = area.y + 10;
@@ -3530,12 +3485,10 @@ void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
         for (size_t i = 0; i < plotSignals.size(); i++) {
             const auto& sig = plotSignals[i];
 
-            // Draw color indicator
             SDL_Rect colorRect = {legendX, legendY, 15, 15};
             SDL_SetRenderDrawColor(renderer, sig.color.r, sig.color.g, sig.color.b, 255);
             SDL_RenderFillRect(renderer, &colorRect);
 
-            // Draw signal name
             renderText(sig.name, legendX + 20, legendY, sig.color);
 
             legendY += 20;
@@ -3639,13 +3592,11 @@ void renderComponentLibrary(SDL_Renderer* renderer) {
     ccvsBtn = {1000, 350, 120, 40, "CCVS", currentTheme.button};
     cccsBtn = {1000, 400, 120, 40, "CCCS", currentTheme.button};
 
-    // Render category buttons
     renderButton(passiveBtn);
     renderButton(sourcesBtn);
     renderButton(semiBtn);
     renderButton(depBtn);
 
-    // Render components based on selected category
     if (showPassives) {
         renderButton(resBtn);
         renderButton(capBtn);
@@ -3669,7 +3620,6 @@ void renderComponentLibrary(SDL_Renderer* renderer) {
         renderButton(cccsBtn);
     }
 
-    // Close button
     Button closeBtn = {libWindow.x + libWindow.w - 40, libWindow.y + 10, 30, 30, "X", RED};
     renderButton(closeBtn);
 }
@@ -3721,32 +3671,26 @@ void plotTransientSignals(SDL_Renderer* renderer, const vector<double>& times,
                           const string& title, SDL_Color color) {
     if (times.empty() || values.empty() || times.size() != values.size()) return;
 
-    // Find min/max values for scaling
     double minVal = *min_element(values.begin(), values.end());
     double maxVal = *max_element(values.begin(), values.end());
     double minTime = *min_element(times.begin(), times.end());
     double maxTime = *max_element(times.begin(), times.end());
 
-    // Add some padding to the scale
     double range = maxVal - minVal;
     minVal -= range * 0.1;
     maxVal += range * 0.1;
 
-    // Draw axes
     SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-    SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h); // X-axis
-    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h); // Y-axis
+    SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h);
+    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h);
 
-    // Draw title
     renderText(title, area.x + 10, area.y + 10, color);
 
-    // Draw scale labels
     renderText(to_string(maxTime).substr(0, 5), area.x + area.w - 50, area.y + area.h - 20, currentTheme.text);
     renderText(to_string(minTime).substr(0, 5), area.x, area.y + area.h - 20, currentTheme.text);
     renderText(to_string(maxVal).substr(0, 5), area.x + 5, area.y + 10, currentTheme.text);
     renderText(to_string(minVal).substr(0, 5), area.x + 5, area.y + area.h - 30, currentTheme.text);
 
-    // Draw the signal
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
     for (size_t i = 1; i < times.size(); i++) {
         int x1 = area.x + static_cast<int>((times[i-1] - minTime) / (maxTime - minTime) * area.w);
@@ -3783,10 +3727,9 @@ int main(int argc, char* argv[]) {
     bool FileDialog = false;
     bool SaveAsDialog = false;
 
-    // Initialize node positions with ground node
     nodePositions[0] = {100, 500};
     reverseNodeMap[0] = "GND";
-    nextNodeNumber = 1; // Start numbering regular nodes from 1
+    nextNodeNumber = 1;
 
     while (running) {
         if (undoStack.empty()) {
@@ -3801,7 +3744,6 @@ int main(int argc, char* argv[]) {
                 int x, y;
                 SDL_GetMouseState(&x, &y);
 
-                // Handle dark mode toggle
                 if (isMouseOver(darkModeBtn.rect, x, y)) {
                     darkMode = !darkMode;
                     currentTheme = darkMode ? darkTheme : lightTheme;
@@ -3809,30 +3751,29 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                // Handle toolbar buttons
                 if (y <= 40) {
-                    if (x >= 10 && x <= 90) { // File button
+                    if (x >= 10 && x <= 90) {
                         FileMenu = !FileMenu;
                         EditMenu = false;
                         ComponentLibrary = false;
                         AnalysisSettings = false;
                         continue;
                     }
-                    else if (x >= 100 && x <= 180) { // Edit button
+                    else if (x >= 100 && x <= 180) {
                         EditMenu = !EditMenu;
                         ComponentLibrary = false;
                         FileMenu = false;
                         AnalysisSettings = false;
                         continue;
                     }
-                    else if (x >= 280 && x <= 360) { // Analyze button
+                    else if (x >= 280 && x <= 360) {
                         AnalysisSettings = !AnalysisSettings;
                         FileMenu = false;
                         EditMenu = false;
                         ComponentLibrary = false;
                         continue;
                     }
-                    else if (x >= 370 && x <= 450) { // Components button
+                    else if (x >= 370 && x <= 450) {
                         ComponentLibrary = !ComponentLibrary;
                         FileMenu = false;
                         EditMenu = false;
@@ -3841,15 +3782,12 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Handle circuit area interactions
                 if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
                     y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
 
-                    // If in placement mode, handle component placement
                     if (currentPlacementMode != PLACE_NONE) {
                         handleComponentPlacement(circuit, x, y);
                     }
-                        // Otherwise handle selection
                     else {
                         handleComponentSelection(circuit, x, y);
                     }
@@ -3864,11 +3802,9 @@ int main(int argc, char* argv[]) {
                     showVoltage = false;
                     showCurrent = true;
                 }
-                // Handle component library
                 if (ComponentLibrary) {
                     handleComponentLibraryClick(x, y);
 
-                    // Check for close button
                     SDL_Rect libWindow = {850, 50, 380, 600};
                     Button closeBtn = {libWindow.x + libWindow.w - 40, libWindow.y + 10, 30, 30, "X", RED};
                     if (isMouseOver(closeBtn.rect, x, y)) {
@@ -3876,10 +3812,8 @@ int main(int argc, char* argv[]) {
                     }
                     continue;
                 }
-                // In your mouse event handler:
                 if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
                     y >= plotArea.y && y <= plotArea.y + plotArea.h) {
-                    // Check if clicked on legend
                     if (showLegend && x < plotArea.x + 150) {
                         int legendIndex = (y - plotArea.y - 10) / 20;
                         if (legendIndex >= 0 && legendIndex < plotSignals.size()) {
@@ -3888,21 +3822,20 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Handle file menu
                 if (FileMenu) {
                     if (x >= fileMenuRect.x + 10 && x <= fileMenuRect.x + 130) {
-                        if (y >= fileMenuRect.y + 40 && y <= fileMenuRect.y + 70) { // New
+                        if (y >= fileMenuRect.y + 40 && y <= fileMenuRect.y + 70) {
                             resetGlobalState();
                             delete circuit;
                             circuit = new Circuit();
                             currentCircuitFile = "";
                             FileMenu = false;
                         }
-                        else if (y >= fileMenuRect.y + 80 && y <= fileMenuRect.y + 110) { // Open
+                        else if (y >= fileMenuRect.y + 80 && y <= fileMenuRect.y + 110) {
                             FileDialog = true;
                             txtFiles = listTxtFiles(".");
                         }
-                        else if (y >= fileMenuRect.y + 120 && y <= fileMenuRect.y + 150) { // Save
+                        else if (y >= fileMenuRect.y + 120 && y <= fileMenuRect.y + 150) {
                             if (!currentCircuitFile.empty()) {
                                 saveCircuitToFile(*circuit, currentCircuitFile);
                             }
@@ -3911,35 +3844,32 @@ int main(int argc, char* argv[]) {
                             }
                             FileMenu = false;
                         }
-                        else if (y >= fileMenuRect.y + 160 && y <= fileMenuRect.y + 190) { // Save As
+                        else if (y >= fileMenuRect.y + 160 && y <= fileMenuRect.y + 190) {
                             SaveAsDialog = true;
                             FileMenu = false;
                         }
-                        else if (y >= fileMenuRect.y + 200 && y <= fileMenuRect.y + 230) { // Exit
+                        else if (y >= fileMenuRect.y + 200 && y <= fileMenuRect.y + 230) {
                             running = false;
                         }
                     }
                     continue;
                 }
 
-                // Handle edit menu
                 if (EditMenu) {
                     if (x >= editMenuRect.x + 10 && x <= editMenuRect.x + 130) {
-                        if (y >= editMenuRect.y + 40 && y <= editMenuRect.y + 70) { // Undo
+                        if (y >= editMenuRect.y + 40 && y <= editMenuRect.y + 70) {
                             if (!undoStack.empty()) {
-                                saveUndoState(circuit);
                                 undo(circuit);
                             }
                             EditMenu = false;
                         }
-                        else if (y >= editMenuRect.y + 80 && y <= editMenuRect.y + 110) { // Redo
+                        else if (y >= editMenuRect.y + 80 && y <= editMenuRect.y + 110) {
                             if (!redoStack.empty()) {
-                                saveUndoState(circuit); // Current state becomes undo
                                 redo(circuit);
                             }
                             EditMenu = false;
                         }
-                        else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) { // Delete
+                        else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) {
                             if (selectedComponent) {
                                 saveUndoState(circuit);
                                 circuit->deleteComponent(selectedComponent->name);
@@ -3948,23 +3878,21 @@ int main(int argc, char* argv[]) {
                             }
                             EditMenu = false;
                         }
-                        else if (y >= editMenuRect.y + 120 && y <= editMenuRect.y + 150) { // Copy
+                        else if (y >= editMenuRect.y + 120 && y <= editMenuRect.y + 150) {
                             if (selectedComponent) {
                                 copiedComponent = selectedComponent->getInfo();
                             }
                             EditMenu = false;
                         }
-                        else if (y >= editMenuRect.y + 160 && y <= editMenuRect.y + 190) { // Paste
+                        else if (y >= editMenuRect.y + 160 && y <= editMenuRect.y + 190) {
                             if (!copiedComponent.empty()) {
                                 istringstream iss(copiedComponent);
                                 string type, name, node1, node2, valueStr;
                                 iss >> type >> name >> node1 >> node2 >> valueStr;
 
-                                // Generate unique name
                                 static int pasteCount = 1;
                                 name = name + "_copy" + to_string(pasteCount++);
 
-                                // Create new component
                                 Component* newComp = nullptr;
                                 if (type == "Resistor") {
                                     newComp = new Resistor(name, getOrCreateNode(node1), getOrCreateNode(node2), stod(valueStr));
@@ -3993,7 +3921,7 @@ int main(int argc, char* argv[]) {
                             }
                             EditMenu = false;
                         }
-                        else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) { // Delete
+                        else if (y >= editMenuRect.y + 200 && y <= editMenuRect.y + 230) {
                             if (selectedComponent) {
                                 saveUndoState(circuit);
                                 circuit->deleteComponent(selectedComponent->name);
@@ -4006,11 +3934,10 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                // Handle analysis settings
                 if (AnalysisSettings) {
                     SDL_Rect analysisWindow = {250, 150, 350, 300};
                     if (x >= analysisWindow.x + 50 && x <= analysisWindow.x + 150 &&
-                        y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) { // Run
+                        y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
                         try {
                             circuit->analyzeTransient(tStep, tStop);
                             showVoltage = true;
@@ -4022,18 +3949,16 @@ int main(int argc, char* argv[]) {
                         }
                     }
                     else if (x >= analysisWindow.x + 200 && x <= analysisWindow.x + 300 &&
-                             y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) { // Cancel
+                             y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
                         AnalysisSettings = false;
                     }
                     continue;
                 }
 
-                // Handle file dialog
                 if (FileDialog) {
                     SDL_Rect dialog = {200, 150, 400, 400};
                     if (x >= dialog.x + 100 && x <= dialog.x + 200 &&
-                        y >= dialog.y + 330 && y <= dialog.y + 370) { // Open
-                        // Find which file was clicked
+                        y >= dialog.y + 330 && y <= dialog.y + 370) {
                         for (size_t i = 0; i < txtFiles.size(); i++) {
                             SDL_Rect fileRect = {dialog.x + 20, dialog.y + 60 + (int)i * 30, 360, 25};
                             if (x >= fileRect.x && x <= fileRect.x + fileRect.w &&
@@ -4050,26 +3975,25 @@ int main(int argc, char* argv[]) {
                         }
                     }
                     else if (x >= dialog.x + 220 && x <= dialog.x + 320 &&
-                             y >= dialog.y + 330 && y <= dialog.y + 370) { // Cancel
+                             y >= dialog.y + 330 && y <= dialog.y + 370) {
                         FileDialog = false;
                     }
                     continue;
                 }
 
-                // Handle save as dialog
                 if (SaveAsDialog) {
                     SDL_Rect dialog = {250, 200, 300, 200};
                     if (x >= dialog.x + 50 && x <= dialog.x + 150 &&
-                        y >= dialog.y + 120 && y <= dialog.y + 160) { // Save
+                        y >= dialog.y + 120 && y <= dialog.y + 160) {
                         handleSaveButton(circuit, nameBox.text);
                         SaveAsDialog = false;
                     }
                     else if (x >= dialog.x + 170 && x <= dialog.x + 270 &&
-                             y >= dialog.y + 120 && y <= dialog.y + 160) { // Cancel
+                             y >= dialog.y + 120 && y <= dialog.y + 160) {
                         SaveAsDialog = false;
                     }
                     else if (x >= dialog.x + 100 && x <= dialog.x + 280 &&
-                             y >= dialog.y + 60 && y <= dialog.y + 90) { // Text box
+                             y >= dialog.y + 60 && y <= dialog.y + 90) {
                         textInputActive = true;
                         activeTextBox = &nameBox;
                         inputText = nameBox.text;
@@ -4077,7 +4001,6 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                // Handle text box input
                 if (x >= node1Box.rect.x && x <= node1Box.rect.x + node1Box.rect.w &&
                     y >= node1Box.rect.y && y <= node1Box.rect.y + node1Box.rect.h) {
                     textInputActive = true;
@@ -4120,7 +4043,6 @@ int main(int argc, char* argv[]) {
                 }
             }
             else if (event.type == SDL_MOUSEWHEEL) {
-                // Zoom with mouse wheel (Ctrl for vertical zoom only)
                 if (SDL_GetModState() & KMOD_CTRL) {
                     if (event.wheel.y > 0) valueZoom *= 1.2;
                     else if (event.wheel.y < 0) valueZoom /= 1.2;
@@ -4133,12 +4055,10 @@ int main(int argc, char* argv[]) {
                         valueZoom /= 1.2;
                     }
                 }
-                // Clamp zoom values
-                timeZoom = std::max(0.1, std::min(timeZoom, 20.0));
-                valueZoom = std::max(0.1, std::min(valueZoom, 20.0));
+                timeZoom = max(0.1, min(timeZoom, 20.0));
+                valueZoom = max(0.1, min(valueZoom, 20.0));
             }
             else if (event.type == SDL_MOUSEMOTION) {
-                // Pan with middle mouse drag
                 if (event.motion.state & SDL_BUTTON_MMASK) {
                     if (!plotSignals.empty() && !plotSignals[0].time.empty()) {
                         double timeRange = (plotSignals[0].time.back() - plotSignals[0].time.front()) / timeZoom;
@@ -4158,11 +4078,9 @@ int main(int argc, char* argv[]) {
                 int x, y;
                 SDL_GetMouseState(&x, &y);
 
-                // Check if right-clicked on a component
                 handleComponentSelection(circuit, x, y);
 
                 if (selectedComponent) {
-                    // Show context menu with delete option
                     SDL_Rect menu = {x, y, 100, 40};
                     SDL_SetRenderDrawColor(renderer, 200, 200, 200, 255);
                     SDL_RenderFillRect(renderer, &menu);
@@ -4171,7 +4089,6 @@ int main(int argc, char* argv[]) {
                     renderButton(deleteBtn);
                     SDL_RenderPresent(renderer);
 
-                    // Wait for user choice
                     bool choiceMade = false;
                     while (!choiceMade) {
                         while (SDL_PollEvent(&event)) {
@@ -4189,15 +4106,13 @@ int main(int argc, char* argv[]) {
                 }
             }
             else if (event.type == SDL_KEYDOWN) {
-                // Handle ESC to cancel placement
                 if (event.key.keysym.sym == SDLK_ESCAPE && currentPlacementMode != PLACE_NONE) {
                     currentPlacementMode = PLACE_NONE;
                     isPlacingComponent = false;
                 }
-                else if (event.key.keysym.sym == SDLK_h) {  // H for help
+                else if (event.key.keysym.sym == SDLK_h) {
                     showShortcutHelp = !showShortcutHelp;
                 }
-                    // In the SDL_KEYDOWN event handler:
                 else if (event.key.keysym.sym == SDLK_DELETE) {
                     if (selectedComponent) {
                         saveUndoState(circuit);
@@ -4206,50 +4121,47 @@ int main(int argc, char* argv[]) {
                         calculateNodePositions(*circuit);
                     }
                 }
-                    // Handle 'W' for wire placement
                 else if (event.key.keysym.mod & KMOD_SHIFT) {
-                    // Shift+key combinations for less common components
                     switch (event.key.keysym.sym) {
-                        case SDLK_d:  // Shift+D for diode
+                        case SDLK_d:
                             currentPlacementMode = PLACE_DIODE;
                             isPlacingComponent = false;
                             cout << "Diode placement mode activated" << endl;
                             break;
-                        case SDLK_g:  // Shift+G for ground
+                        case SDLK_g:
                             currentPlacementMode = PLACE_GROUND;
                             isPlacingComponent = false;
                             cout << "Ground placement mode activated" << endl;
                             break;
                     }
                 } else {
-                    // Regular key combinations for common components
                     switch (event.key.keysym.sym) {
-                        case SDLK_r:  // R for resistor
+                        case SDLK_r:
                             currentPlacementMode = PLACE_RESISTOR;
                             isPlacingComponent = false;
                             cout << "Resistor placement mode activated" << endl;
                             break;
-                        case SDLK_c:  // C for capacitor
+                        case SDLK_c:
                             currentPlacementMode = PLACE_CAPACITOR;
                             isPlacingComponent = false;
                             cout << "Capacitor placement mode activated" << endl;
                             break;
-                        case SDLK_l:  // L for inductor
+                        case SDLK_l:
                             currentPlacementMode = PLACE_INDUCTOR;
                             isPlacingComponent = false;
                             cout << "Inductor placement mode activated" << endl;
                             break;
-                        case SDLK_v:  // V for voltage source
+                        case SDLK_v:
                             currentPlacementMode = PLACE_VOLTAGE_SOURCE;
                             isPlacingComponent = false;
                             cout << "Voltage source placement mode activated" << endl;
                             break;
-                        case SDLK_i:  // I for current source
+                        case SDLK_i:
                             currentPlacementMode = PLACE_CURRENT_SOURCE;
                             isPlacingComponent = false;
                             cout << "Current source placement mode activated" << endl;
                             break;
-                        case SDLK_w:  // W for wire
+                        case SDLK_w:
                             currentPlacementMode = PLACE_WIRE;
                             isPlacingComponent = false;
                             cout << "Wire placement mode activated" << endl;
@@ -4260,7 +4172,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Update text boxes if we're actively editing one
         if (textInputActive) {
             if (activeTextBox) {
                 activeTextBox->text = inputText;
@@ -4270,79 +4181,62 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Render everything
         SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
         SDL_RenderClear(renderer);
 
 
-        // Draw circuit area
         SDL_SetRenderDrawColor(renderer, currentTheme.circuitBg.r, currentTheme.circuitBg.g, currentTheme.circuitBg.b, 255);
         SDL_RenderFillRect(renderer, &circuitArea);
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawRect(renderer, &circuitArea);
 
-        // Draw plot area
         SDL_SetRenderDrawColor(renderer, currentTheme.plotBg.r, currentTheme.plotBg.g, currentTheme.plotBg.b, 255);
         SDL_RenderFillRect(renderer, &plotArea);
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawRect(renderer, &plotArea);
 
-        // Draw the circuit
         if (circuit) {
             drawCircuit(*circuit, renderer);
         }
 
         if (!plotSignals.empty()) {
             drawLTspiceStylePlot(renderer, plotArea);
-
-            // Add measurement cursor if needed
-            if (selectedSignalIndex >= 0) {
-                // ... cursor drawing code ...
-            }
         }
 
-        // Draw toolbar
         drawToolbar(renderer);
 
-        // Draw text boxes
         renderTextBox(node1Box);
         renderTextBox(node2Box);
         renderTextBox(valueBox);
 
-        // Draw file menu if open
         if (FileMenu) {
             showFileMenu(renderer, fileMenuRect);
         }
 
-        // Draw edit menu if open
         if (EditMenu) {
             showEditMenu(renderer, editMenuRect);
         }
 
-        // Draw component library if open
         if (ComponentLibrary) {
             renderComponentLibrary(renderer);
         }
 
-        // Draw analysis settings if open
         if (AnalysisSettings) {
             showAnalysisSettings(renderer);
         }
 
-        // Draw file dialog if open
         if (FileDialog) {
             showFileDialog(renderer, txtFiles);
         }
 
-        // Draw save as dialog if open
         if (SaveAsDialog) {
             showSaveAsDialog(renderer, nameBox.text);
         }
 
-        // Draw selected component properties if one is selected
         if (selectedComponent) {
             showComponentProperties(renderer, selectedComponent);
         }
+
         if (showShortcutHelp) {
             SDL_Rect helpBackground = {0, 0, 250, 250};
             SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 200);
@@ -4350,7 +4244,6 @@ int main(int argc, char* argv[]) {
             renderShortcutHelp(renderer);
         }
 
-        // Show placement mode status
         if (currentPlacementMode != PLACE_NONE) {
             string modeName = "";
             switch(currentPlacementMode) {
@@ -4371,15 +4264,12 @@ int main(int argc, char* argv[]) {
 
             renderText(message, 10, SCREEN_HEIGHT - 30, currentTheme.text);
 
-            // Update screen
             SDL_RenderPresent(renderer);
         }
 
-        // Update screen
         SDL_RenderPresent(renderer);
     }
 
-    // Cleanup
     for (auto circuit : undoStack) {
         delete circuit;
     }
