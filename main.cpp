@@ -1215,9 +1215,9 @@ public:
     }
     string getType() override { return "Resistor"; }
 
-    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
-        SDL_Point p1 = getNodePosition(node1);
-        SDL_Point p2 = getNodePosition(node2);
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
+        SDL_Point p1 = nodePositions.at(node1);
+        SDL_Point p2 = nodePositions.at(node2);
 
         const int segments = 5;
         const int amplitude = 10;
@@ -1312,38 +1312,40 @@ public:
     }
     string getType() override { return "Capacitor"; }
 
-    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        const int gap = 12;
 
         float dx = p2.x - p1.x;
         float dy = p2.y - p1.y;
         float length = sqrt(dx*dx + dy*dy);
-
         dx /= length;
         dy /= length;
         float px = -dy;
         float py = dx;
 
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
-
+        // Draw leads
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, p1.x + dx*(length/2 - gap), p1.y + dy*(length/2 - gap));
+        SDL_RenderDrawLine(renderer, p1.x + dx*(length/2 + gap), p1.y + dy*(length/2 + gap), p2.x, p2.y);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
+        // Draw plates
+        SDL_Point plate1[2] = {
+                {int(p1.x + dx*(length/2 - gap) + px*gap), int(p1.y + dy*(length/2 - gap) + py*gap)},
+                {int(p1.x + dx*(length/2 - gap) - px*gap), int(p1.y + dy*(length/2 - gap) - py*gap)}
+        };
+        SDL_Point plate2[2] = {
+                {int(p1.x + dx*(length/2 + gap) + px*gap), int(p1.y + dy*(length/2 + gap) + py*gap)},
+                {int(p1.x + dx*(length/2 + gap) - px*gap), int(p1.y + dy*(length/2 + gap) - py*gap)}
+        };
+
+        SDL_RenderDrawLines(renderer, plate1, 2);
+        SDL_RenderDrawLines(renderer, plate2, 2);
+
+        int midX = (p1.x + p2.x)/2 + px * gap*2;
+        int midY = (p1.y + p2.y)/2 + py * gap*2;
         renderText(name, midX, midY, currentTheme.text);
     }
 
@@ -1414,38 +1416,54 @@ public:
 
     string getType() override { return "Inductor"; }
 
-    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        const int loops = 3;
+        const int radius = 8;
 
         float dx = p2.x - p1.x;
         float dy = p2.y - p1.y;
         float length = sqrt(dx*dx + dy*dy);
-
         dx /= length;
         dy /= length;
         float px = -dy;
         float py = dx;
 
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
+        float segmentLength = length / (loops * 2);
+        SDL_Point prevPoint = {p1.x, p1.y};
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
+        // Draw leads
+        SDL_RenderDrawLine(renderer, p1.x, p1.y,
+                           p1.x + dx*segmentLength, p1.y + dy*segmentLength);
+
+        // Draw loops
+        for (int i = 0; i < loops; i++) {
+            float centerX = p1.x + dx * (i * 2 + 1) * segmentLength;
+            float centerY = p1.y + dy * (i * 2 + 1) * segmentLength;
+
+            for (int angle = -90; angle <= 90; angle += 5) {
+                float rad = angle * M_PI / 180.0f;
+                int x = centerX + px * radius * cos(rad);
+                int y = centerY + py * radius * sin(rad);
+
+                if (angle == -90) {
+                    prevPoint = {x, y};
+                } else {
+                    SDL_RenderDrawLine(renderer, prevPoint.x, prevPoint.y, x, y);
+                    prevPoint = {x, y};
+                }
+            }
+        }
+
+        // Draw final lead
+        SDL_RenderDrawLine(renderer, prevPoint.x, prevPoint.y, p2.x, p2.y);
+
+        int midX = (p1.x + p2.x)/2 + px * radius*2;
+        int midY = (p1.y + p2.y)/2 + py * radius*2;
         renderText(name, midX, midY, currentTheme.text);
     }
 
@@ -1535,39 +1553,45 @@ public:
 
     string getType() override { return "Diode"; }
 
-    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        const int triangleSize = 15;
 
         float dx = p2.x - p1.x;
         float dy = p2.y - p1.y;
         float length = sqrt(dx*dx + dy*dy);
-
         dx /= length;
         dy /= length;
         float px = -dy;
         float py = dx;
 
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
+        int midX = (p1.x + p2.x) / 2;
+        int midY = (p1.y + p2.y) / 2;
 
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
-
+        // Draw leads
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, midX - dx * triangleSize, midY - dy * triangleSize);
+        SDL_RenderDrawLine(renderer, midX + dx * triangleSize, midY + dy * triangleSize, p2.x, p2.y);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        // Draw triangle
+        SDL_Point triangle[4];
+        triangle[0] = {int(midX - dx * triangleSize), int(midY - dy * triangleSize)};
+        triangle[1] = {int(midX + px * triangleSize), int(midY + py * triangleSize)};
+        triangle[2] = {int(midX - px * triangleSize), int(midY - py * triangleSize)};
+        triangle[3] = triangle[0];
+
+        SDL_RenderDrawLines(renderer, triangle, 4);
+
+        // Draw line
+        SDL_RenderDrawLine(renderer,
+                           midX + dx * triangleSize/2 + px * triangleSize/2,
+                           midY + dy * triangleSize/2 + py * triangleSize/2,
+                           midX + dx * triangleSize/2 - px * triangleSize/2,
+                           midY + dy * triangleSize/2 - py * triangleSize/2);
+
+        renderText(name, midX + px * triangleSize*2, midY + py * triangleSize*2, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -1597,39 +1621,21 @@ public:
 
     string getType() override { return "Ground"; }
 
-    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
-        SDL_Point p1 = nodePositions.at(node1);
-        SDL_Point p2 = nodePositions.at(node2);
-
-        const int segments = 5;
-        const int amplitude = 10;
-
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        float length = sqrt(dx*dx + dy*dy);
-
-        dx /= length;
-        dy /= length;
-        float px = -dy;
-        float py = dx;
-
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
+        SDL_Point p = nodePositions.at(node1);
+        const int size = 15;
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        // Draw vertical line
+        SDL_RenderDrawLine(renderer, p.x, p.y, p.x, p.y + size);
+
+        // Draw horizontal lines
+        SDL_RenderDrawLine(renderer, p.x - size, p.y + size, p.x + size, p.y + size);
+        SDL_RenderDrawLine(renderer, p.x - size/2, p.y + size*1.5, p.x + size/2, p.y + size*1.5);
+        SDL_RenderDrawLine(renderer, p.x - size/4, p.y + size*2, p.x + size/4, p.y + size*2);
+
+        renderText(name, p.x + size + 5, p.y + size, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -1673,39 +1679,32 @@ public:
     }
     string getType() override { return "VoltageSource"; }
 
-    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        const int radius = 12;
+        int centerX = (p1.x + p2.x) / 2;
+        int centerY = (p1.y + p2.y) / 2;
 
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        float length = sqrt(dx*dx + dy*dy);
+        // Draw leads
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - radius, centerY);
+        SDL_RenderDrawLine(renderer, centerX + radius, centerY, p2.x, p2.y);
 
-        dx /= length;
-        dy /= length;
-        float px = -dy;
-        float py = dx;
-
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
+        // Draw circle
+        for (int angle = 0; angle < 360; angle += 10) {
+            float rad = angle * M_PI / 180.0f;
+            int x = centerX + radius * cos(rad);
+            int y = centerY + radius * sin(rad);
+            SDL_RenderDrawPoint(renderer, x, y);
         }
 
-        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        // Draw plus sign
+        SDL_RenderDrawLine(renderer, centerX-5, centerY, centerX+5, centerY);
+        SDL_RenderDrawLine(renderer, centerX, centerY-5, centerX, centerY+5);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        renderText(name, centerX + radius + 5, centerY - 10, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -1935,39 +1934,33 @@ public:
 
     string getType() override { return "CurrentSource"; }
 
-    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        const int radius = 12;
+        int centerX = (p1.x + p2.x) / 2;
+        int centerY = (p1.y + p2.y) / 2;
 
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        float length = sqrt(dx*dx + dy*dy);
+        // Draw leads
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - radius, centerY);
+        SDL_RenderDrawLine(renderer, centerX + radius, centerY, p2.x, p2.y);
 
-        dx /= length;
-        dy /= length;
-        float px = -dy;
-        float py = dx;
-
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
+        // Draw circle
+        for (int angle = 0; angle < 360; angle += 10) {
+            float rad = angle * M_PI / 180.0f;
+            int x = centerX + radius * cos(rad);
+            int y = centerY + radius * sin(rad);
+            SDL_RenderDrawPoint(renderer, x, y);
         }
 
-        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        // Draw arrow
+        SDL_RenderDrawLine(renderer, centerX, centerY-8, centerX, centerY+8);
+        SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX-5, centerY+3);
+        SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX+5, centerY+3);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        renderText(name, centerX + radius + 5, centerY - 10, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -3334,20 +3327,19 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
 }
 
 void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
+    // Draw wires first
     for (const auto& wire : circuit.getWires()) {
         auto p1 = nodePositions.at(wire.first);
         auto p2 = nodePositions.at(wire.second);
         drawWire(renderer, p1.x, p1.y, p2.x, p2.y, currentTheme.text);
     }
 
+    // Draw components with their specific render methods
     for (const auto& comp : circuit.getComponents()) {
         comp->render(renderer, nodePositions);
     }
 
-    for (const auto& comp : circuit.getComponents()) {
-        comp->render(renderer, nodePositions);
-    }
-
+    // Draw nodes
     for (const auto& node : nodePositions) {
         SDL_Rect nodeRect = {node.second.x - 5, node.second.y - 5, 10, 10};
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
@@ -3357,48 +3349,39 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         renderText(label, node.second.x + 12, node.second.y - 8, currentTheme.text);
     }
 
+    // Draw component being placed
     if (isPlacingComponent) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
 
-        if (currentPlacementMode == PLACE_WIRE) {
-            drawWire(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY, GREEN);
-        } else {
-            switch(currentPlacementMode) {
-                case PLACE_RESISTOR:
-                    drawResistorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                    break;
-                case PLACE_CAPACITOR:
-                    drawCapacitorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                    break;
-                case PLACE_INDUCTOR:
-                    drawInductorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                    break;
-                case PLACE_VOLTAGE_SOURCE:
-                    drawVoltageSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                    break;
-                case PLACE_CURRENT_SOURCE:
-                    drawCurrentSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                    break;
-                case PLACE_DIODE:
-                    drawDiodePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
-                    break;
-                case PLACE_GROUND:
-                    drawGroundPreview(renderer, mouseX, mouseY);
-                    break;
-                default:
-                    break;
-            }
+        switch(currentPlacementMode) {
+            case PLACE_RESISTOR:
+                drawResistorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+            case PLACE_CAPACITOR:
+                drawCapacitorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+            case PLACE_INDUCTOR:
+                drawInductorPreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+            case PLACE_VOLTAGE_SOURCE:
+                drawVoltageSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+            case PLACE_CURRENT_SOURCE:
+                drawCurrentSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+            case PLACE_DIODE:
+                drawDiodePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
+            case PLACE_GROUND:
+                drawGroundPreview(renderer, mouseX, mouseY);
+                break;
+            case PLACE_WIRE:
+                drawWire(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY, GREEN);
+                break;
+            default:
+                break;
         }
-    }
-
-    for (const auto& node : circuit.getNodeMap()) {
-
-        SDL_Point pos = nodePositions[node.second];
-        SDL_Rect nodeRect = {pos.x - 5, pos.y - 5, 10, 10};
-        SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
-        SDL_RenderFillRect(renderer, &nodeRect);
-        renderText(node.first, pos.x + 10, pos.y - 10, currentTheme.text);
     }
 }
 
