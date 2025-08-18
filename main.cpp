@@ -14,7 +14,7 @@
 #include <SDL2/SDL2_gfx.h>
 #include <SDL2/SDL_ttf.h>
 #include <unordered_set>
-#include <unordered_map>
+#include <memory>
 
 using namespace std;
 
@@ -35,7 +35,6 @@ struct PlotSignal {
     SDL_Color color;
 };
 
-vector<PlotSignal> plotSignals;
 int selectedSignalIndex = -1;
 bool showGrid = true;
 bool showLegend = true;
@@ -103,8 +102,8 @@ bool ComponentLibrary = false;
 bool AnalysisSettings = false;
 bool showShortcutHelp = false;
 
-double tStep = 0.001;
-double tStop = 0.1;
+double tStep = 0.01;
+double tStop = 1;
 map<int, SDL_Point> nodePositions;
 
 SDL_Window* window = nullptr;
@@ -139,9 +138,7 @@ SDL_Rect plotArea = {850, 50, 380, 600};
 SDL_Rect fileMenuRect = {10, 45, 140, 250};
 SDL_Rect editMenuRect = {100, 45, 140, 250};
 
-TextBox node1Box = {{10, SCREEN_HEIGHT - 60, 100, 40}, "Node1", false};
-TextBox node2Box = {{120, SCREEN_HEIGHT - 60, 100, 40}, "Node2", false};
-TextBox valueBox = {{230, SCREEN_HEIGHT - 60, 100, 40}, "Value", false};
+TextBox valueBox = {{10, SCREEN_HEIGHT - 60, 100, 40}, "Value", false};
 TextBox nameBox = {{300, 210, 180, 30}, "Name", false};
 
 bool darkMode = false;
@@ -200,8 +197,7 @@ Button vcvsBtn = {1000, 250, 120, 40, "VCVS", currentTheme.button};
 Button vccsBtn = {1000, 300, 120, 40, "VCCS", currentTheme.button};
 Button ccvsBtn = {1000, 350, 120, 40, "CCVS", currentTheme.button};
 Button cccsBtn = {1000, 400, 120, 40, "CCCS", currentTheme.button};
-Button voltageBtn = {plotArea.x + 10, plotArea.y + 10, 100, 30, "Voltage", currentTheme.button};
-Button currentBtn = {plotArea.x + 120, plotArea.y + 10, 100, 30, "Current", currentTheme.button};
+
 
 enum ComponentType {
     RESISTOR,
@@ -394,6 +390,15 @@ public:
     virtual Component* clone() const = 0;
 
 };
+
+void renderText(const string& text, int x, int y,  SDL_Color color = currentTheme.text) {
+    SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_Rect rect = {x, y, surface->w, surface->h};
+    SDL_RenderCopy(renderer, texture, nullptr, &rect);
+    SDL_FreeSurface(surface);
+    SDL_DestroyTexture(texture);
+}
 
 class Circuit {
 public:
@@ -838,7 +843,7 @@ public:
         }
 
         int numVars = numNodes + numVSources + numInductors;
-        plotSignals.clear();
+
         while (t <= tStop) {
             vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
             vector<vector<double>> B(numNodes, vector<double>(numVSources + numInductors, 0.0));
@@ -875,33 +880,17 @@ public:
 
                 x = solveSystem(A, b);
 
-                for (int node = 1; node <= numNodes; node++) {
-                    if (node >= plotSignals.size()) {
-                        plotSignals.push_back({vector<double>(), vector<double>(),
-                                               "Node " + to_string(node),
-                                               {static_cast<Uint8>(50 + node*50),
-                                                static_cast<Uint8>(100 + node*30),
-                                                static_cast<Uint8>(150 + node*20), 255}});
-                    }
-                    plotSignals[node-1].time.push_back(t);
-                    plotSignals[node-1].values.push_back(x[node-1]);
+                for (int i = 0; i < numNodes; i++) {
+                    Vtimes.push_back(t);
+                    voltages.push_back(x[i]);
                 }
 
-                for (size_t compIdx = 0; compIdx < components.size(); compIdx++) {
-                    auto comp = components[compIdx];
+                for (auto comp : components) {
                     if (comp->type == RESISTOR || comp->type == CAPACITOR ||
                         comp->type == INDUCTOR || comp->type == DIODE) {
-                        int sigIdx = numNodes + compIdx;
-                        if (sigIdx >= plotSignals.size()) {
-                            plotSignals.push_back({vector<double>(), vector<double>(),
-                                                   comp->name + " I",
-                                                   {static_cast<Uint8>(200 - compIdx*20),
-                                                    static_cast<Uint8>(100 + compIdx*10),
-                                                    static_cast<Uint8>(50 + compIdx*15), 255}});
+                        Itimes.push_back(t);
+                        currents.push_back(comp->getCurrent(x));
                         }
-                        plotSignals[sigIdx].time.push_back(t);
-                        plotSignals[sigIdx].values.push_back(comp->getCurrent(x));
-                    }
                 }
 
             } catch (const runtime_error& e) {
@@ -916,6 +905,136 @@ public:
             t += tStep;
         }
     }
+
+    void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
+        if (voltages.empty() && currents.empty()) return;
+
+        SDL_SetRenderDrawColor(renderer, currentTheme.plotBg.r, currentTheme.plotBg.g, currentTheme.plotBg.b, 255);
+        SDL_RenderFillRect(renderer, &area);
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawRect(renderer, &area);
+
+        double minTime = numeric_limits<double>::max();
+        double maxTime = numeric_limits<double>::lowest();
+        double minValue = numeric_limits<double>::max();
+        double maxValue = numeric_limits<double>::lowest();
+
+        for (int i = 0; i < voltages.size(); i++) {
+            if (!Vtimes.empty()) {
+                minTime = min(minTime, Vtimes.front());
+                maxTime = max(maxTime, Vtimes.back());
+
+                if (!voltages.empty()) {
+                    auto Iminmax = minmax_element(currents.begin(), currents.end());
+
+                    if (Iminmax.first != currents.end()) minValue = min(minValue, *Iminmax.first);
+                    if (Iminmax.second != currents.end()) maxValue = max(maxValue, *Iminmax.second);
+
+                    auto Vminmax = minmax_element(voltages.begin(), voltages.end());
+
+                    if (Vminmax.first != voltages.end()) minValue = min(minValue, *Vminmax.first);
+                    if (Vminmax.second != voltages.end()) maxValue = max(maxValue, *Vminmax.second);
+
+                }
+            }
+        }
+
+        if (minTime == numeric_limits<double>::max()) minTime = 0;
+        if (maxTime == numeric_limits<double>::lowest()) maxTime = 1;
+        if (minValue == numeric_limits<double>::max()) minValue = 0;
+        if (maxValue == numeric_limits<double>::lowest()) maxValue = 1;
+
+        double valueRange = maxValue - minValue;
+        if (valueRange < 1e-12) valueRange = 1;
+        minValue -= valueRange * 0.1;
+        maxValue += valueRange * 0.1;
+
+        double timeRange = maxTime - minTime;
+        if (timeRange <= 0) timeRange = 1;
+
+        timeRange /= timeZoom;
+        valueRange = (maxValue - minValue) / valueZoom;
+        double centerTime = (minTime + maxTime) / 2 + timePan;
+        double centerValue = (minValue + maxValue) / 2 + valuePan;
+        minTime = centerTime - timeRange/2;
+        maxTime = centerTime + timeRange/2;
+        minValue = centerValue - valueRange/2;
+        maxValue = centerValue + valueRange/2;
+
+        if (showGrid) {
+            SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 50);
+
+            double timeStep = pow(10, floor(log10(timeRange)));
+            if (timeStep <= 0) timeStep = 1;
+
+            for (double t = ceil(minTime/timeStep)*timeStep; t <= maxTime; t += timeStep) {
+                int x = area.x + static_cast<int>((t - minTime) / timeRange * area.w);
+                SDL_RenderDrawLine(renderer, x, area.y, x, area.y + area.h);
+                renderText(to_string(t).substr(0, 6), x + 2, area.y + area.h - 20, currentTheme.text);
+            }
+
+            double valueStep = pow(10, floor(log10(valueRange)));
+            if (valueStep <= 0) valueStep = 1;
+
+            for (double v = ceil(minValue/valueStep)*valueStep; v <= maxValue; v += valueStep) {
+                int y = area.y + area.h - static_cast<int>((v - minValue) / valueRange * area.h);
+                SDL_RenderDrawLine(renderer, area.x, y, area.x + area.w, y);
+                renderText(to_string(v).substr(0, 6), area.x + 2, y - 20, currentTheme.text);
+            }
+        }
+
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h);
+        SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h);
+
+        SDL_SetRenderDrawColor(renderer, 200, 0, 0, 255);
+
+        for (size_t i = 1; i <= Vtimes.size(); i++) {
+            int x1 = area.x + static_cast<int>((Vtimes[i-1] - minTime) / timeRange * area.w);
+            int y1 = area.y + area.h - static_cast<int>((voltages[i-1] - minValue) / valueRange * area.h);
+
+            for (int x = -3; x <= 3; x++) {
+                for (int y = -3; y <= 3; y++) {
+                    if (x*x + y*y <= 3 * 3) {
+                        SDL_RenderDrawPoint(renderer, x1 + x, y1 + y);
+                    }
+                }
+            }
+        }
+
+        SDL_SetRenderDrawColor(renderer, 0, 200, 0, 255);
+
+        for (size_t i = 1; i <= Itimes.size(); i++) {
+            int x1 = area.x + static_cast<int>((Itimes[i-1] - minTime) / timeRange * area.w);
+            int y1 = area.y + area.h - static_cast<int>((currents[i-1] - minValue) / valueRange * area.h);
+
+            for (int x = -3; x <= 3; x++) {
+                for (int y = -3; y <= 3; y++) {
+                    if (x*x + y*y <= 3 * 3) {
+                        SDL_RenderDrawPoint(renderer, x1 + x, y1 + y);
+                    }
+                }
+            }
+        }
+
+        if (showLegend) {
+            int legendX = area.x + 10;
+            int legendY = area.y + 10;
+
+            for (size_t i = 0; i < components.size(); i++) {
+                const auto& sig = components[i];
+
+                SDL_Rect colorRect = {legendX, legendY, 15, 15};
+                SDL_SetRenderDrawColor(renderer, 120, 0, 0, 255);
+                SDL_RenderFillRect(renderer, &colorRect);
+
+                renderText(sig->name, legendX + 20, legendY, BLACK);
+
+                legendY += 20;
+            }
+        }
+    }
+
 
     void printTransientResults(const vector<double>& times, const vector<double>& voltages,
                                const vector<double>& currents, int numNodes) {
@@ -1145,15 +1264,6 @@ bool saveCircuitToFile(const Circuit& circuit, const string& filename) {
     return true;
 }
 
-void renderText(const string& text, int x, int y,  SDL_Color color = currentTheme.text) {
-    SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_Rect rect = {x, y, surface->w, surface->h};
-    SDL_RenderCopy(renderer, texture, nullptr, &rect);
-    SDL_FreeSurface(surface);
-    SDL_DestroyTexture(texture);
-}
-
 void renderButton(const Button& button) {
     SDL_SetRenderDrawColor(renderer, button.color.r, button.color.g, button.color.b, 255);
     SDL_RenderFillRect(renderer, &button.rect);
@@ -1326,12 +1436,10 @@ public:
         float px = -dy;
         float py = dx;
 
-        // Draw leads
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLine(renderer, p1.x, p1.y, p1.x + dx*(length/2 - gap), p1.y + dy*(length/2 - gap));
         SDL_RenderDrawLine(renderer, p1.x + dx*(length/2 + gap), p1.y + dy*(length/2 + gap), p2.x, p2.y);
 
-        // Draw plates
         SDL_Point plate1[2] = {
                 {int(p1.x + dx*(length/2 - gap) + px*gap), int(p1.y + dy*(length/2 - gap) + py*gap)},
                 {int(p1.x + dx*(length/2 - gap) - px*gap), int(p1.y + dy*(length/2 - gap) - py*gap)}
@@ -1436,11 +1544,9 @@ public:
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
 
-        // Draw leads
         SDL_RenderDrawLine(renderer, p1.x, p1.y,
                            p1.x + dx*segmentLength, p1.y + dy*segmentLength);
 
-        // Draw loops
         for (int i = 0; i < loops; i++) {
             float centerX = p1.x + dx * (i * 2 + 1) * segmentLength;
             float centerY = p1.y + dy * (i * 2 + 1) * segmentLength;
@@ -1459,7 +1565,6 @@ public:
             }
         }
 
-        // Draw final lead
         SDL_RenderDrawLine(renderer, prevPoint.x, prevPoint.y, p2.x, p2.y);
 
         int midX = (p1.x + p2.x)/2 + px * radius*2;
@@ -1570,12 +1675,10 @@ public:
         int midX = (p1.x + p2.x) / 2;
         int midY = (p1.y + p2.y) / 2;
 
-        // Draw leads
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLine(renderer, p1.x, p1.y, midX - dx * triangleSize, midY - dy * triangleSize);
         SDL_RenderDrawLine(renderer, midX + dx * triangleSize, midY + dy * triangleSize, p2.x, p2.y);
 
-        // Draw triangle
         SDL_Point triangle[4];
         triangle[0] = {int(midX - dx * triangleSize), int(midY - dy * triangleSize)};
         triangle[1] = {int(midX + px * triangleSize), int(midY + py * triangleSize)};
@@ -1584,7 +1687,6 @@ public:
 
         SDL_RenderDrawLines(renderer, triangle, 4);
 
-        // Draw line
         SDL_RenderDrawLine(renderer,
                            midX + dx * triangleSize/2 + px * triangleSize/2,
                            midY + dy * triangleSize/2 + py * triangleSize/2,
@@ -1627,10 +1729,8 @@ public:
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
 
-        // Draw vertical line
         SDL_RenderDrawLine(renderer, p.x, p.y, p.x, p.y + size);
 
-        // Draw horizontal lines
         SDL_RenderDrawLine(renderer, p.x - size, p.y + size, p.x + size, p.y + size);
         SDL_RenderDrawLine(renderer, p.x - size/2, p.y + size*1.5, p.x + size/2, p.y + size*1.5);
         SDL_RenderDrawLine(renderer, p.x - size/4, p.y + size*2, p.x + size/4, p.y + size*2);
@@ -1687,12 +1787,10 @@ public:
         int centerX = (p1.x + p2.x) / 2;
         int centerY = (p1.y + p2.y) / 2;
 
-        // Draw leads
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - radius, centerY);
         SDL_RenderDrawLine(renderer, centerX + radius, centerY, p2.x, p2.y);
 
-        // Draw circle
         for (int angle = 0; angle < 360; angle += 10) {
             float rad = angle * M_PI / 180.0f;
             int x = centerX + radius * cos(rad);
@@ -1700,7 +1798,6 @@ public:
             SDL_RenderDrawPoint(renderer, x, y);
         }
 
-        // Draw plus sign
         SDL_RenderDrawLine(renderer, centerX-5, centerY, centerX+5, centerY);
         SDL_RenderDrawLine(renderer, centerX, centerY-5, centerX, centerY+5);
 
@@ -1942,12 +2039,10 @@ public:
         int centerX = (p1.x + p2.x) / 2;
         int centerY = (p1.y + p2.y) / 2;
 
-        // Draw leads
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - radius, centerY);
         SDL_RenderDrawLine(renderer, centerX + radius, centerY, p2.x, p2.y);
 
-        // Draw circle
         for (int angle = 0; angle < 360; angle += 10) {
             float rad = angle * M_PI / 180.0f;
             int x = centerX + radius * cos(rad);
@@ -1955,7 +2050,6 @@ public:
             SDL_RenderDrawPoint(renderer, x, y);
         }
 
-        // Draw arrow
         SDL_RenderDrawLine(renderer, centerX, centerY-8, centerX, centerY+8);
         SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX-5, centerY+3);
         SDL_RenderDrawLine(renderer, centerX, centerY+8, centerX+5, centerY+3);
@@ -2924,8 +3018,6 @@ void showFileMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
     renderButton(saveBtn);
     renderButton(saveAsBtn);
     renderButton(exitBtn);
-    renderButton(voltageBtn);
-    renderButton(currentBtn);
 }
 
 void showEditMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
@@ -3560,19 +3652,16 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
 }
 
 void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
-    // Draw wires first
     for (const auto& wire : circuit.getWires()) {
         auto p1 = nodePositions.at(wire.first);
         auto p2 = nodePositions.at(wire.second);
         drawWire(renderer, p1.x, p1.y, p2.x, p2.y, currentTheme.text);
     }
 
-    // Draw components with their specific render methods
     for (const auto& comp : circuit.getComponents()) {
         comp->render(renderer, nodePositions);
     }
 
-    // Draw nodes
     for (const auto& node : nodePositions) {
         SDL_Rect nodeRect = {node.second.x - 5, node.second.y - 5, 10, 10};
         SDL_SetRenderDrawColor(renderer, BLUE.r, BLUE.g, BLUE.b, 255);
@@ -3582,7 +3671,6 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
         renderText(label, node.second.x + 12, node.second.y - 8, currentTheme.text);
     }
 
-    // Draw component being placed
     if (isPlacingComponent) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
@@ -3614,100 +3702,6 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
                 break;
             default:
                 break;
-        }
-    }
-}
-
-void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
-    if (plotSignals.empty()) return;
-
-    SDL_SetRenderDrawColor(renderer, currentTheme.plotBg.r, currentTheme.plotBg.g, currentTheme.plotBg.b, 255);
-    SDL_RenderFillRect(renderer, &area);
-    SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-    SDL_RenderDrawRect(renderer, &area);
-
-    double minTime = plotSignals[0].time.empty() ? 0 : plotSignals[0].time[0];
-    double maxTime = plotSignals[0].time.empty() ? 1 : plotSignals[0].time.back();
-    double minValue = 0, maxValue = 1;
-
-    for (const auto& sig : plotSignals) {
-        if (!sig.time.empty()) {
-            minTime = min(minTime, sig.time.front());
-            maxTime = max(maxTime, sig.time.back());
-
-            /*auto [min_it, max_it]= minmax_element(sig.values.begin(), sig.values.end());
-            if (min_it != sig.values.end()) minValue = min(minValue, *min_it);
-            if (max_it != sig.values.end()) maxValue = max(maxValue, *max_it);*/
-        }
-    }
-
-    double valueRange = maxValue - minValue;
-    minValue -= valueRange * 0.1;
-    maxValue += valueRange * 0.1;
-
-    double timeRange = maxTime - minTime;
-    if (timeRange <= 0) timeRange = 1;
-
-    timeRange /= timeZoom;
-    valueRange = (maxValue - minValue) / valueZoom;
-    double centerTime = (minTime + maxTime) / 2 + timePan;
-    double centerValue = (minValue + maxValue) / 2 + valuePan;
-    minTime = centerTime - timeRange/2;
-    maxTime = centerTime + timeRange/2;
-    minValue = centerValue - valueRange/2;
-    maxValue = centerValue + valueRange/2;
-
-    if (showGrid) {
-        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 50);
-
-        double timeStep = pow(10, floor(log10(timeRange)));
-        for (double t = ceil(minTime/timeStep)*timeStep; t <= maxTime; t += timeStep) {
-            int x = area.x + static_cast<int>((t - minTime) / timeRange * area.w);
-            SDL_RenderDrawLine(renderer, x, area.y, x, area.y + area.h);
-            renderText(to_string(t).substr(0, 6), x + 2, area.y + area.h - 20, currentTheme.text);
-        }
-
-        double valueStep = pow(10, floor(log10(valueRange)));
-        for (double v = ceil(minValue/valueStep)*valueStep; v <= maxValue; v += valueStep) {
-            int y = area.y + area.h - static_cast<int>((v - minValue) / valueRange * area.h);
-            SDL_RenderDrawLine(renderer, area.x, y, area.x + area.w, y);
-            renderText(to_string(v).substr(0, 6), area.x + 2, y - 20, currentTheme.text);
-        }
-    }
-
-    SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-    SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h);
-    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h);
-
-    for (const auto& sig : plotSignals) {
-        if (sig.time.size() != sig.values.size() || sig.time.empty()) continue;
-
-        SDL_SetRenderDrawColor(renderer, sig.color.r, sig.color.g, sig.color.b, 255);
-
-        for (size_t i = 1; i < sig.time.size(); i++) {
-            int x1 = area.x + static_cast<int>((sig.time[i-1] - minTime) / timeRange * area.w);
-            int y1 = area.y + area.h - static_cast<int>((sig.values[i-1] - minValue) / valueRange * area.h);
-            int x2 = area.x + static_cast<int>((sig.time[i] - minTime) / timeRange * area.w);
-            int y2 = area.y + area.h - static_cast<int>((sig.values[i] - minValue) / valueRange * area.h);
-
-            SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
-        }
-    }
-
-    if (showLegend) {
-        int legendX = area.x + 10;
-        int legendY = area.y + 10;
-
-        for (size_t i = 0; i < plotSignals.size(); i++) {
-            const auto& sig = plotSignals[i];
-
-            SDL_Rect colorRect = {legendX, legendY, 15, 15};
-            SDL_SetRenderDrawColor(renderer, sig.color.r, sig.color.g, sig.color.b, 255);
-            SDL_RenderFillRect(renderer, &colorRect);
-
-            renderText(sig.name, legendX + 20, legendY, sig.color);
-
-            legendY += 20;
         }
     }
 }
@@ -3882,42 +3876,6 @@ void renderShortcutHelp(SDL_Renderer* renderer) {
     renderText("ESC - Cancel placement", 20, y, currentTheme.text); y += 25;
 }
 
-void plotTransientSignals(SDL_Renderer* renderer, const vector<double>& times,
-                          const vector<double>& values, const SDL_Rect& area,
-                          const string& title, SDL_Color color) {
-    if (times.empty() || values.empty() || times.size() != values.size()) return;
-
-    double minVal = *min_element(values.begin(), values.end());
-    double maxVal = *max_element(values.begin(), values.end());
-    double minTime = *min_element(times.begin(), times.end());
-    double maxTime = *max_element(times.begin(), times.end());
-
-    double range = maxVal - minVal;
-    minVal -= range * 0.1;
-    maxVal += range * 0.1;
-
-    SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-    SDL_RenderDrawLine(renderer, area.x, area.y + area.h, area.x + area.w, area.y + area.h);
-    SDL_RenderDrawLine(renderer, area.x, area.y, area.x, area.y + area.h);
-
-    renderText(title, area.x + 10, area.y + 10, color);
-
-    renderText(to_string(maxTime).substr(0, 5), area.x + area.w - 50, area.y + area.h - 20, currentTheme.text);
-    renderText(to_string(minTime).substr(0, 5), area.x, area.y + area.h - 20, currentTheme.text);
-    renderText(to_string(maxVal).substr(0, 5), area.x + 5, area.y + 10, currentTheme.text);
-    renderText(to_string(minVal).substr(0, 5), area.x + 5, area.y + area.h - 30, currentTheme.text);
-
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
-    for (size_t i = 1; i < times.size(); i++) {
-        int x1 = area.x + static_cast<int>((times[i-1] - minTime) / (maxTime - minTime) * area.w);
-        int y1 = area.y + area.h - static_cast<int>((values[i-1] - minVal) / (maxVal - minVal) * area.h);
-        int x2 = area.x + static_cast<int>((times[i] - minTime) / (maxTime - minTime) * area.w);
-        int y2 = area.y + area.h - static_cast<int>((values[i] - minVal) / (maxVal - minVal) * area.h);
-
-        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
-    }
-}
-
 int main(int argc, char* argv[]) {
     changeToPreviousDirectory();
     renderStatus(renderer);
@@ -4009,15 +3967,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-
-                if (isMouseOver(voltageBtn.rect, x, y)) {
-                    showVoltage = true;
-                    showCurrent = false;
-                }
-                else if (isMouseOver(currentBtn.rect, x, y)) {
-                    showVoltage = false;
-                    showCurrent = true;
-                }
                 if (ComponentLibrary) {
                     handleComponentLibraryClick(x, y);
 
@@ -4032,7 +3981,7 @@ int main(int argc, char* argv[]) {
                     y >= plotArea.y && y <= plotArea.y + plotArea.h) {
                     if (showLegend && x < plotArea.x + 150) {
                         int legendIndex = (y - plotArea.y - 10) / 20;
-                        if (legendIndex >= 0 && legendIndex < plotSignals.size()) {
+                        if (legendIndex >= 0 && legendIndex < circuit->components.size()) {
                             selectedSignalIndex = legendIndex;
                         }
                     }
@@ -4155,7 +4104,13 @@ int main(int argc, char* argv[]) {
                     if (x >= analysisWindow.x + 50 && x <= analysisWindow.x + 150 &&
                         y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
                         try {
-                            circuit->analyzeTransient(tStep, tStop);
+                            if (hasDynamic) {
+                                circuit->analyzeTransient(tStep,tStop);
+                                circuit->printTransientResults(Vtimes, voltages, currents, circuit->listNodes().size() - 1);
+                            }
+                            else {
+                                circuit->analyzeDC();
+                            }
                             showVoltage = true;
                             showCurrent = false;
                             AnalysisSettings = false;
@@ -4217,19 +4172,7 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
-                if (x >= node1Box.rect.x && x <= node1Box.rect.x + node1Box.rect.w &&
-                    y >= node1Box.rect.y && y <= node1Box.rect.y + node1Box.rect.h) {
-                    textInputActive = true;
-                    activeTextBox = &node1Box;
-                    inputText = node1Box.text;
-                }
-                else if (x >= node2Box.rect.x && x <= node2Box.rect.x + node2Box.rect.w &&
-                         y >= node2Box.rect.y && y <= node2Box.rect.y + node2Box.rect.h) {
-                    textInputActive = true;
-                    activeTextBox = &node2Box;
-                    inputText = node2Box.text;
-                }
-                else if (x >= valueBox.rect.x && x <= valueBox.rect.x + valueBox.rect.w &&
+                if (x >= valueBox.rect.x && x <= valueBox.rect.x + valueBox.rect.w &&
                          y >= valueBox.rect.y && y <= valueBox.rect.y + valueBox.rect.h) {
                     textInputActive = true;
                     activeTextBox = &valueBox;
@@ -4276,10 +4219,10 @@ int main(int argc, char* argv[]) {
             }
             else if (event.type == SDL_MOUSEMOTION) {
                 if (event.motion.state & SDL_BUTTON_MMASK) {
-                    if (!plotSignals.empty() && !plotSignals[0].time.empty()) {
-                        double timeRange = (plotSignals[0].time.back() - plotSignals[0].time.front()) / timeZoom;
-                        double minVal = *min_element(plotSignals[0].values.begin(), plotSignals[0].values.end());
-                        double maxVal = *max_element(plotSignals[0].values.begin(), plotSignals[0].values.end());
+                    if (!Vtimes.empty() && !Vtimes.empty()) {
+                        double timeRange = (Vtimes.back() - Vtimes.front()) / timeZoom;
+                        double minVal = *min_element(voltages.begin(), voltages.end());
+                        double maxVal = *max_element(voltages.begin(), voltages.end());
                         double valueRange = (maxVal - minVal) / valueZoom;
 
                         timePan += event.motion.xrel * timeRange / plotArea.w;
@@ -4415,14 +4358,12 @@ int main(int argc, char* argv[]) {
             drawCircuit(*circuit, renderer);
         }
 
-        if (!plotSignals.empty()) {
-            drawLTspiceStylePlot(renderer, plotArea);
+        if (!Vtimes.empty()) {
+            circuit->drawLTspiceStylePlot(renderer, plotArea);
         }
 
         drawToolbar(renderer);
 
-        renderTextBox(node1Box);
-        renderTextBox(node2Box);
         renderTextBox(valueBox);
 
         if (FileMenu) {
