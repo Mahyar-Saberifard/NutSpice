@@ -3600,8 +3600,8 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                         newComp->nodeName2 = node2Name;
                         break;
                     case PLACE_VCVS: {
-                        string cn1 = node1Box.text;
-                        string cn2 = node2Box.text;
+                        string cn1 = "1";
+                        string cn2 = "2";
                         double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
                         name = "E" + to_string(compCount++);
                         int ctrlNode1 = getOrCreateNode(cn1);
@@ -3610,8 +3610,8 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                         break;
                     }
                     case PLACE_VCCS: {
-                        string cn1 = node1Box.text;
-                        string cn2 = node2Box.text;
+                        string cn1 = "1";
+                        string cn2 = "2";
                         double gm = valueBox.text.empty() ? 0.1 : parseSpiceValue(valueBox.text);
                         name = "G" + to_string(compCount++);
                         int ctrlNode1 = getOrCreateNode(cn1);
@@ -3620,14 +3620,14 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                         break;
                     }
                     case PLACE_CCVS: {
-                        string vsName = node1Box.text; // Using node1Box for controlling source name
+                        string vsName = "CCVS"; // Using node1Box for controlling source name
                         double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
                         name = "H" + to_string(compCount++);
                         newComp = new CCVS(name, node1, node2, vsName, gain);
                         break;
                     }
                     case PLACE_CCCS: {
-                        string vsName = node1Box.text; // Using node1Box for controlling source name
+                        string vsName = "CCCS"; // Using node1Box for controlling source name
                         double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
                         name = "F" + to_string(compCount++);
                         newComp = new CCCS(name, node1, node2, vsName, gain);
