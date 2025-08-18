@@ -343,7 +343,7 @@ public:
     double value;
 
     Component(ComponentType t, const string& n, int n1, int n2, double val)
-        : type(t), name(n), node1(n1), node2(n2), value(val) {
+            : type(t), name(n), node1(n1), node2(n2), value(val) {
         nodeName1 = getNodeName(n1);
         nodeName2 = getNodeName(n2);
     }
@@ -2191,49 +2191,77 @@ public:
     void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
+        SDL_Point cp1 = nodePositions.at(ctrlNode1);
+        SDL_Point cp2 = nodePositions.at(ctrlNode2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        // Draw the main component (diamond shape for dependent source)
+        const int size = 15;
+        int centerX = (p1.x + p2.x) / 2;
+        int centerY = (p1.y + p2.y) / 2;
 
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        float length = sqrt(dx*dx + dy*dy);
-
-        dx /= length;
-        dy /= length;
-        float px = -dy;
-        float py = dx;
-
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
+        // Draw diamond
+        SDL_Point diamond[5] = {
+                {centerX, centerY - size},
+                {centerX + size, centerY},
+                {centerX, centerY + size},
+                {centerX - size, centerY},
+                {centerX, centerY - size}
+        };
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        SDL_RenderDrawLines(renderer, diamond, 5);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        // Draw leads
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX, centerY - size);
+        SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX, centerY + size);
+
+        // Draw control path (dashed line)
+        int midCtrlX = (cp1.x + cp2.x) / 2;
+        int midCtrlY = (cp1.y + cp2.y) / 2;
+
+        // Draw dashed line from control nodes to component
+        const int dashLength = 5;
+        float dx = centerX - midCtrlX;
+        float dy = centerY - midCtrlY;
+        float distance = sqrt(dx*dx + dy*dy);
+        dx /= distance;
+        dy /= distance;
+
+        for (float i = 0; i < distance; i += dashLength * 2) {
+            float startX = midCtrlX + dx * i;
+            float startY = midCtrlY + dy * i;
+            float endX = midCtrlX + dx * (i + dashLength);
+            float endY = midCtrlY + dy * (i + dashLength);
+
+            if (endX > midCtrlX + dx * distance) endX = midCtrlX + dx * distance;
+            if (endY > midCtrlY + dy * distance) endY = midCtrlY + dy * distance;
+
+            SDL_RenderDrawLine(renderer, static_cast<int>(startX), static_cast<int>(startY),
+                               static_cast<int>(endX), static_cast<int>(endY));
+        }
+
+        // Draw plus and minus signs at control nodes
+        SDL_RenderDrawLine(renderer, cp1.x - 5, cp1.y, cp1.x + 5, cp1.y);
+        SDL_RenderDrawLine(renderer, cp1.x, cp1.y - 5, cp1.x, cp1.y + 5);
+
+        SDL_RenderDrawLine(renderer, cp2.x - 5, cp2.y, cp2.x + 5, cp2.y);
+
+        // Draw gain value
+        //renderText(name + " (G=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
+        SDL_Point cp1 = nodePositions.at(ctrlNode1);
+        SDL_Point cp2 = nodePositions.at(ctrlNode2);
 
-        SDL_Rect rect;
-        rect.x = min(p1.x, p2.x) - 15;
-        rect.y = min(p1.y, p2.y) - 15;
-        rect.w = abs(p1.x - p2.x) + 30;
-        rect.h = abs(p1.y - p2.y) + 30;
+        int minX = min({p1.x, p2.x, cp1.x, cp2.x});
+        int minY = min({p1.y, p2.y, cp1.y, cp2.y});
+        int maxX = max({p1.x, p2.x, cp1.x, cp2.x});
+        int maxY = max({p1.y, p2.y, cp1.y, cp2.y});
 
-        return rect;
+        return {minX - 20, minY - 20, maxX - minX + 40, maxY - minY + 40};
     }
 
     Component* clone() const override {
@@ -2275,48 +2303,49 @@ public:
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        // Draw the main component (diamond shape for dependent source)
+        const int size = 15;
+        int centerX = (p1.x + p2.x) / 2;
+        int centerY = (p1.y + p2.y) / 2;
 
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        float length = sqrt(dx*dx + dy*dy);
-
-        dx /= length;
-        dy /= length;
-        float px = -dy;
-        float py = dx;
-
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
+        // Draw diamond
+        SDL_Point diamond[5] = {
+                {centerX, centerY - size},
+                {centerX + size, centerY},
+                {centerX, centerY + size},
+                {centerX - size, centerY},
+                {centerX, centerY - size}
+        };
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        SDL_RenderDrawLines(renderer, diamond, 5);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        // Draw leads
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX, centerY - size);
+        SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX, centerY + size);
+
+        // Draw arrow pointing to controlling element
+        // Find controlling component (simplified - in real implementation you'd need to look it up)
+        SDL_Point controlPoint = {centerX + size*2, centerY};
+        SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
+        SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
+        SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y + 5);
+
+        // Draw gain value
+//        renderText(name + " (R=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
+//        renderText("Controls: " + controllingVoltageSourceName, centerX - 50, centerY + size + 15, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        SDL_Rect rect;
-        rect.x = min(p1.x, p2.x) - 15;
-        rect.y = min(p1.y, p2.y) - 15;
-        rect.w = abs(p1.x - p2.x) + 30;
-        rect.h = abs(p1.y - p2.y) + 30;
+        int minX = min(p1.x, p2.x) - 30;
+        int minY = min(p1.y, p2.y) - 30;
+        int maxX = max(p1.x, p2.x) + 30;
+        int maxY = max(p1.y, p2.y) + 30;
 
-        return rect;
+        return {minX, minY, maxX - minX, maxY - minY};
     }
 
     Component* clone() const override {
@@ -2347,49 +2376,82 @@ public:
     void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
+        SDL_Point cp1 = nodePositions.at(ctrlNode1);
+        SDL_Point cp2 = nodePositions.at(ctrlNode2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        // Draw the main component (diamond shape with arrow for current source)
+        const int size = 15;
+        int centerX = (p1.x + p2.x) / 2;
+        int centerY = (p1.y + p2.y) / 2;
 
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        float length = sqrt(dx*dx + dy*dy);
-
-        dx /= length;
-        dy /= length;
-        float px = -dy;
-        float py = dx;
-
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
+        // Draw diamond
+        SDL_Point diamond[5] = {
+                {centerX, centerY - size},
+                {centerX + size, centerY},
+                {centerX, centerY + size},
+                {centerX - size, centerY},
+                {centerX, centerY - size}
+        };
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        SDL_RenderDrawLines(renderer, diamond, 5);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        // Draw arrow inside diamond indicating current direction
+        SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
+        SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
+        SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
+
+        // Draw leads
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - size, centerY);
+        SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX + size, centerY);
+
+        // Draw control path (dashed line)
+        int midCtrlX = (cp1.x + cp2.x) / 2;
+        int midCtrlY = (cp1.y + cp2.y) / 2;
+
+        // Draw dashed line from control nodes to component
+        const int dashLength = 5;
+        float dx = centerX - midCtrlX;
+        float dy = centerY - midCtrlY;
+        float distance = sqrt(dx*dx + dy*dy);
+        dx /= distance;
+        dy /= distance;
+
+        for (float i = 0; i < distance; i += dashLength * 2) {
+            float startX = midCtrlX + dx * i;
+            float startY = midCtrlY + dy * i;
+            float endX = midCtrlX + dx * (i + dashLength);
+            float endY = midCtrlY + dy * (i + dashLength);
+
+            if (endX > midCtrlX + dx * distance) endX = midCtrlX + dx * distance;
+            if (endY > midCtrlY + dy * distance) endY = midCtrlY + dy * distance;
+
+            SDL_RenderDrawLine(renderer, static_cast<int>(startX), static_cast<int>(startY),
+                               static_cast<int>(endX), static_cast<int>(endY));
+        }
+
+        // Draw plus and minus signs at control nodes
+        SDL_RenderDrawLine(renderer, cp1.x - 5, cp1.y, cp1.x + 5, cp1.y);
+        SDL_RenderDrawLine(renderer, cp1.x, cp1.y - 5, cp1.x, cp1.y + 5);
+
+        SDL_RenderDrawLine(renderer, cp2.x - 5, cp2.y, cp2.x + 5, cp2.y);
+
+        // Draw transconductance value
+        //  renderText(name + " (gm=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
+        SDL_Point cp1 = nodePositions.at(ctrlNode1);
+        SDL_Point cp2 = nodePositions.at(ctrlNode2);
 
-        SDL_Rect rect;
-        rect.x = min(p1.x, p2.x) - 15;
-        rect.y = min(p1.y, p2.y) - 15;
-        rect.w = abs(p1.x - p2.x) + 30;
-        rect.h = abs(p1.y - p2.y) + 30;
+        int minX = min({p1.x, p2.x, cp1.x, cp2.x});
+        int minY = min({p1.y, p2.y, cp1.y, cp2.y});
+        int maxX = max({p1.x, p2.x, cp1.x, cp2.x});
+        int maxY = max({p1.y, p2.y, cp1.y, cp2.y});
 
-        return rect;
+        return {minX - 20, minY - 20, maxX - minX + 40, maxY - minY + 40};
     }
 
     Component* clone() const override {
@@ -2425,54 +2487,75 @@ public:
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        const int segments = 5;
-        const int amplitude = 10;
+        // Draw the main component (diamond shape with arrow for current source)
+        const int size = 15;
+        int centerX = (p1.x + p2.x) / 2;
+        int centerY = (p1.y + p2.y) / 2;
 
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        float length = sqrt(dx*dx + dy*dy);
-
-        dx /= length;
-        dy /= length;
-        float px = -dy;
-        float py = dx;
-
-        SDL_Point points[segments + 1];
-        for (int i = 0; i <= segments; i++) {
-            float t = (float)i / segments;
-            float x = p1.x + t * (p2.x - p1.x);
-            float y = p1.y + t * (p2.y - p1.y);
-
-            float offset = (i % 2) ? amplitude : -amplitude;
-            points[i].x = x + px * offset;
-            points[i].y = y + py * offset;
-        }
+        // Draw diamond
+        SDL_Point diamond[5] = {
+                {centerX, centerY - size},
+                {centerX + size, centerY},
+                {centerX, centerY + size},
+                {centerX - size, centerY},
+                {centerX, centerY - size}
+        };
 
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-        SDL_RenderDrawLines(renderer, points, segments + 1);
+        SDL_RenderDrawLines(renderer, diamond, 5);
 
-        int midX = (p1.x + p2.x)/2 + px * amplitude*2;
-        int midY = (p1.y + p2.y)/2 + py * amplitude*2;
-        renderText(name, midX, midY, currentTheme.text);
+        // Draw arrow inside diamond indicating current direction
+        SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
+        SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
+        SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
+
+        // Draw leads
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - size, centerY);
+        SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX + size, centerY);
+
+        // Draw arrow pointing to controlling element
+        // Find controlling component (simplified - in real implementation you'd need to look it up)
+        SDL_Point controlPoint = {centerX + size*2, centerY};
+        SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
+        SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
+        SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y + 5);
+
+        // Draw gain value
+//        renderText(name + " (F=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
+//        renderText("Controls: " + controllingVoltageSourceName, centerX - 50, centerY + size + 15, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        SDL_Rect rect;
-        rect.x = min(p1.x, p2.x) - 15;
-        rect.y = min(p1.y, p2.y) - 15;
-        rect.w = abs(p1.x - p2.x) + 30;
-        rect.h = abs(p1.y - p2.y) + 30;
+        int minX = min(p1.x, p2.x) - 30;
+        int minY = min(p1.y, p2.y) - 30;
+        int maxX = max(p1.x, p2.x) + 30;
+        int maxY = max(p1.y, p2.y) + 30;
 
-        return rect;
+        return {minX, minY, maxX - minX, maxY - minY};
     }
 
     Component* clone() const override {
         return new CCCS(*this);
     }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 void processCircuitFile(const string& filename, Circuit& circuit) {
     ifstream file(filename);
@@ -3178,6 +3261,122 @@ void drawGroundPreview(SDL_Renderer* renderer, int x, int y) {
     SDL_RenderDrawLine(renderer, x - size/4, y + size*2, x + size/4, y + size*2);
 }
 
+void drawVCVSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
+    const int size = 15;
+    int centerX = (x1 + x2) / 2;
+    int centerY = (y1 + y2) / 2;
+
+    // Draw diamond
+    SDL_Point diamond[5] = {
+            {centerX, centerY - size},
+            {centerX + size, centerY},
+            {centerX, centerY + size},
+            {centerX - size, centerY},
+            {centerX, centerY - size}
+    };
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLines(renderer, diamond, 5);
+
+    // Draw leads
+    SDL_RenderDrawLine(renderer, x1, y1, centerX, centerY - size);
+    SDL_RenderDrawLine(renderer, x2, y2, centerX, centerY + size);
+
+    // Draw control path indicator (simplified for preview)
+    SDL_RenderDrawLine(renderer, centerX + size, centerY, centerX + size*2, centerY);
+}
+
+void drawVCCSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
+    const int size = 15;
+    int centerX = (x1 + x2) / 2;
+    int centerY = (y1 + y2) / 2;
+
+    // Draw diamond
+    SDL_Point diamond[5] = {
+            {centerX, centerY - size},
+            {centerX + size, centerY},
+            {centerX, centerY + size},
+            {centerX - size, centerY},
+            {centerX, centerY - size}
+    };
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLines(renderer, diamond, 5);
+
+    // Draw arrow inside diamond
+    SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
+    SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
+    SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
+
+    // Draw leads
+    SDL_RenderDrawLine(renderer, x1, y1, centerX - size, centerY);
+    SDL_RenderDrawLine(renderer, x2, y2, centerX + size, centerY);
+
+    // Draw control path indicator (simplified for preview)
+    SDL_RenderDrawLine(renderer, centerX + size, centerY, centerX + size*2, centerY);
+}
+
+void drawCCVSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
+    const int size = 15;
+    int centerX = (x1 + x2) / 2;
+    int centerY = (y1 + y2) / 2;
+
+    // Draw diamond
+    SDL_Point diamond[5] = {
+            {centerX, centerY - size},
+            {centerX + size, centerY},
+            {centerX, centerY + size},
+            {centerX - size, centerY},
+            {centerX, centerY - size}
+    };
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLines(renderer, diamond, 5);
+
+    // Draw leads
+    SDL_RenderDrawLine(renderer, x1, y1, centerX, centerY - size);
+    SDL_RenderDrawLine(renderer, x2, y2, centerX, centerY + size);
+
+    // Draw control arrow
+    SDL_Point controlPoint = {centerX + size*2, centerY};
+    SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
+    SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
+    SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y + 5);
+}
+
+void drawCCCSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
+    const int size = 15;
+    int centerX = (x1 + x2) / 2;
+    int centerY = (y1 + y2) / 2;
+
+    // Draw diamond
+    SDL_Point diamond[5] = {
+            {centerX, centerY - size},
+            {centerX + size, centerY},
+            {centerX, centerY + size},
+            {centerX - size, centerY},
+            {centerX, centerY - size}
+    };
+
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLines(renderer, diamond, 5);
+
+    // Draw arrow inside diamond
+    SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
+    SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
+    SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
+
+    // Draw leads
+    SDL_RenderDrawLine(renderer, x1, y1, centerX - size, centerY);
+    SDL_RenderDrawLine(renderer, x2, y2, centerX + size, centerY);
+
+    // Draw control arrow
+    SDL_Point controlPoint = {centerX + size*2, centerY};
+    SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
+    SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
+    SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y + 5);
+}
+
 int findOrCreateNodeAt(int x, int y) {
     const int NODE_PROXIMITY_THRESHOLD = 15;
 
@@ -3308,6 +3507,40 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                         newComp->nodeName1 = node1Name;
                         newComp->nodeName2 = node2Name;
                         break;
+                    case PLACE_VCVS: {
+                        string cn1 = node1Box.text;
+                        string cn2 = node2Box.text;
+                        double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
+                        name = "E" + to_string(compCount++);
+                        int ctrlNode1 = getOrCreateNode(cn1);
+                        int ctrlNode2 = getOrCreateNode(cn2);
+                        newComp = new VCVS(name, node1, node2, ctrlNode1, ctrlNode2, gain);
+                        break;
+                    }
+                    case PLACE_VCCS: {
+                        string cn1 = node1Box.text;
+                        string cn2 = node2Box.text;
+                        double gm = valueBox.text.empty() ? 0.1 : parseSpiceValue(valueBox.text);
+                        name = "G" + to_string(compCount++);
+                        int ctrlNode1 = getOrCreateNode(cn1);
+                        int ctrlNode2 = getOrCreateNode(cn2);
+                        newComp = new VCCS(name, node1, node2, ctrlNode1, ctrlNode2, gm);
+                        break;
+                    }
+                    case PLACE_CCVS: {
+                        string vsName = node1Box.text; // Using node1Box for controlling source name
+                        double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
+                        name = "H" + to_string(compCount++);
+                        newComp = new CCVS(name, node1, node2, vsName, gain);
+                        break;
+                    }
+                    case PLACE_CCCS: {
+                        string vsName = node1Box.text; // Using node1Box for controlling source name
+                        double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
+                        name = "F" + to_string(compCount++);
+                        newComp = new CCCS(name, node1, node2, vsName, gain);
+                        break;
+                    }
                     default:
                         break;
                 }
@@ -4237,6 +4470,10 @@ int main(int argc, char* argv[]) {
                 case PLACE_CURRENT_SOURCE: modeName = "Current Source"; break;
                 case PLACE_DIODE: modeName = "Diode"; break;
                 case PLACE_GROUND: modeName = "Ground"; break;
+                case PLACE_VCCS: modeName = "VCCS"; break;
+                case PLACE_VCVS: modeName = "VCVS"; break;
+                case PLACE_CCCS: modeName = "CCCS"; break;
+                case PLACE_CCVS: modeName = "CCVS"; break;
                 default: break;
             }
 
