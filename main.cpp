@@ -42,6 +42,12 @@ double timeZoom = 1.0;
 double valueZoom = 1.0;
 double timePan = 0.0;
 double valuePan = 0.0;
+bool showCursor = false;
+int cursorX = -1;
+int cursorY = -1;
+double cursorTime = 0.0;
+double cursorValue = 0.0;
+bool cursorDragging = false;
 
 vector<string> listTxtFiles(const string& directory) {
     vector<string> files;
@@ -398,6 +404,66 @@ void renderText(const string& text, int x, int y,  SDL_Color color = currentThem
     SDL_RenderCopy(renderer, texture, nullptr, &rect);
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
+}
+
+void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
+                             const vector<double>& times, const vector<double>& values,
+                             double minTime, double maxTime, double minValue, double maxValue) {
+    int x, y;
+    SDL_GetMouseState(&x, &y);
+
+    if (event.type == SDL_MOUSEBUTTONDOWN) {
+        if (event.button.button == SDL_BUTTON_LEFT) {
+            if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
+                y >= plotArea.y && y <= plotArea.y + plotArea.h) {
+                showCursor = true;
+                cursorX = x;
+                cursorY = y;
+                cursorDragging = true;
+
+                // Calculate cursor values
+                double timeRange = maxTime - minTime;
+                double valueRange = maxValue - minValue;
+                cursorTime = minTime + (cursorX - plotArea.x) * timeRange / plotArea.w;
+                cursorValue = maxValue - (cursorY - plotArea.y) * valueRange / plotArea.h;
+            }
+        }
+    }
+    else if (event.type == SDL_MOUSEBUTTONUP) {
+        if (event.button.button == SDL_BUTTON_LEFT) {
+            cursorDragging = false;
+        }
+    }
+    else if (event.type == SDL_MOUSEMOTION && cursorDragging) {
+        if (showCursor) {
+            cursorX = x;
+            cursorY = y;
+
+            // Constrain cursor to plot area
+            if (cursorX < plotArea.x) cursorX = plotArea.x;
+            if (cursorX > plotArea.x + plotArea.w) cursorX = plotArea.x + plotArea.w;
+            if (cursorY < plotArea.y) cursorY = plotArea.y;
+            if (cursorY > plotArea.y + plotArea.h) cursorY = plotArea.y + plotArea.h;
+
+            // Calculate cursor values
+            double timeRange = maxTime - minTime;
+            double valueRange = maxValue - minValue;
+            cursorTime = minTime + (cursorX - plotArea.x) * timeRange / plotArea.w;
+            cursorValue = maxValue - (cursorY - plotArea.y) * valueRange / plotArea.h;
+        }
+    }
+    else if (event.type == SDL_KEYDOWN) {
+        if (event.key.keysym.sym == SDLK_k) {
+            showCursor = !showCursor;
+            if (!showCursor) {
+                cursorDragging = false;
+            }
+        }
+        else if (event.key.keysym.sym == SDLK_ESCAPE && showCursor) {
+            showCursor = false;
+            cursorDragging = false;
+        }
+    }
 }
 
 class Circuit {
@@ -1033,6 +1099,83 @@ public:
                 legendY += 20;
             }
         }
+
+
+
+
+            // Add cursor drawing logic
+        if (showCursor && cursorX >= area.x && cursorX <= area.x + area.w &&
+            cursorY >= area.y && cursorY <= area.y + area.h) {
+
+            // Draw vertical cursor line
+            SDL_SetRenderDrawColor(renderer, 204, 153, 0, 128); // Yellow with transparency
+            SDL_RenderDrawLine(renderer, cursorX, area.y, cursorX, area.y + area.h);
+
+            // Draw horizontal cursor line
+            SDL_RenderDrawLine(renderer, area.x, cursorY, area.x + area.w, cursorY);
+
+            // Calculate cursor values
+            cursorTime = minTime + (cursorX - area.x) * timeRange / area.w;
+            cursorValue = maxValue - (cursorY - area.y) * valueRange / area.h;
+
+            // Draw cursor information box
+            SDL_Rect infoBox = {cursorX + 10, cursorY - 80, 180, 70};
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
+            SDL_RenderFillRect(renderer, &infoBox);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_RenderDrawRect(renderer, &infoBox);
+
+            string timeStr = "Time: " + to_string(cursorTime).substr(0, 8) + "s";
+            string valueStr = "Value: " + to_string(cursorValue).substr(0, 8);
+
+            renderText(timeStr, infoBox.x + 5, infoBox.y + 5, WHITE);
+            renderText(valueStr, infoBox.x + 5, infoBox.y + 25, WHITE);
+
+            // Find closest data point
+            if (!Vtimes.empty()) {
+                double minDistance = numeric_limits<double>::max();
+                size_t closestIndex = 0;
+                double closestValue = 0;
+
+                for (size_t i = 0; i < Vtimes.size(); i++) {
+                    double distance = abs(Vtimes[i] - cursorTime);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestIndex = i;
+                        closestValue = voltages[i];
+                    }
+                }
+
+                // Draw point highlight
+                int pointX = area.x + static_cast<int>((Vtimes[closestIndex] - minTime) / timeRange * area.w);
+                int pointY = area.y + area.h - static_cast<int>((voltages[closestIndex] - minValue) / valueRange * area.h);
+
+                SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+                for (int i = -5; i <= 5; i++) {
+                    for (int j = -5; j <= 5; j++) {
+                        if (i*i + j*j <= 25) {
+                            SDL_RenderDrawPoint(renderer, pointX + i, pointY + j);
+                        }
+                    }
+                }
+
+                // Add point information
+                string pointInfo = "Point: " + to_string(closestValue).substr(0, 8);
+                renderText(pointInfo, infoBox.x + 5, infoBox.y + 45, WHITE);
+            }
+
+            // Draw cursor position indicators on axes
+            SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
+
+            // Time axis indicator
+            SDL_Rect timeIndicator = {cursorX, area.y + area.h - 5, 1, 10};
+            SDL_RenderFillRect(renderer, &timeIndicator);
+
+            // Value axis indicator
+            SDL_Rect valueIndicator = {area.x - 10, cursorY, 10, 1};
+            SDL_RenderFillRect(renderer, &valueIndicator);
+        }
+
     }
 
 
@@ -3911,6 +4054,16 @@ int main(int argc, char* argv[]) {
         }
 
         while (SDL_PollEvent(&event)) {
+
+            if (!Vtimes.empty() && !voltages.empty()) {
+                double minTime = *min_element(Vtimes.begin(), Vtimes.end());
+                double maxTime = *max_element(Vtimes.begin() , Vtimes.end());
+                double minValue = *min_element(voltages.begin(), voltages.end());
+                double maxValue = *max_element(voltages.begin(), voltages.end());
+
+                handleCursorInteraction(event, plotArea, Vtimes, voltages,
+                                        minTime, maxTime, minValue, maxValue);
+            }
             if (event.type == SDL_QUIT) {
                 running = false;
             }
@@ -3923,6 +4076,11 @@ int main(int argc, char* argv[]) {
                     currentTheme = darkMode ? darkTheme : lightTheme;
                     darkModeBtn.text = darkMode ? "Light Mode" : "Dark Mode";
                     continue;
+                }
+                if (showCursor && x >= plotArea.x && x <= plotArea.x + plotArea.w &&
+                    y >= plotArea.y && y <= plotArea.y + plotArea.h) {
+                    cursorX = x;
+                    cursorY = y;
                 }
 
                 if (y <= 40) {
@@ -4200,6 +4358,10 @@ int main(int argc, char* argv[]) {
                     textInputActive = false;
                     inputText = "";
                 }
+
+
+
+
             }
             else if (event.type == SDL_MOUSEWHEEL) {
                 if (SDL_GetModState() & KMOD_CTRL) {
