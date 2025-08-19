@@ -34,6 +34,19 @@ struct PlotSignal {
     string name;
     SDL_Color color;
 };
+struct Cursor {
+    int x;
+    int y;
+    double time;
+    double value;
+    bool active;
+    SDL_Color color;
+    bool dragging;
+};
+
+
+vector<Cursor> cursors;
+int activeCursorIndex = -1;
 
 int selectedSignalIndex = -1;
 bool showGrid = true;
@@ -416,56 +429,108 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
         if (event.button.button == SDL_BUTTON_LEFT) {
             if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
                 y >= plotArea.y && y <= plotArea.y + plotArea.h) {
-                showCursor = true;
-                cursorX = x;
-                cursorY = y;
-                cursorDragging = true;
+
+                // Find if clicking near existing cursor
+                activeCursorIndex = -1;
+                for (size_t i = 0; i < cursors.size(); i++) {
+                    if (abs(x - cursors[i].x) < 10 && abs(y - cursors[i].y) < 10) {
+                        activeCursorIndex = i;
+                        cursors[i].dragging = true;
+                        break;
+                    }
+                }
+
+                // If not near existing cursor, create new one with right click
+            }
+        }
+        else if (event.button.button == SDL_BUTTON_RIGHT) {
+            if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
+                y >= plotArea.y && y <= plotArea.y + plotArea.h) {
+
+                // Create new cursor on right click
+                Cursor newCursor;
+                newCursor.x = x;
+                newCursor.y = y;
+                newCursor.dragging = true;
+                newCursor.active = true;
 
                 // Calculate cursor values
                 double timeRange = maxTime - minTime;
                 double valueRange = maxValue - minValue;
-                cursorTime = minTime + (cursorX - plotArea.x) * timeRange / plotArea.w;
-                cursorValue = maxValue - (cursorY - plotArea.y) * valueRange / plotArea.h;
+                newCursor.time = minTime + (newCursor.x - plotArea.x) * timeRange / plotArea.w;
+                newCursor.value = maxValue - (newCursor.y - plotArea.y) * valueRange / plotArea.h;
+
+                // Assign different colors to cursors
+                static const vector<SDL_Color> cursorColors = {
+                        {204, 153, 0, 128},    // Yellow
+                        {0, 153, 204, 128},    // Blue
+                        {204, 0, 153, 128},    // Magenta
+                        {0, 204, 153, 128},    // Teal
+                        {153, 0, 204, 128}     // Purple
+                };
+                newCursor.color = cursorColors[cursors.size() % cursorColors.size()];
+
+                cursors.push_back(newCursor);
+                activeCursorIndex = cursors.size() - 1;
             }
         }
     }
     else if (event.type == SDL_MOUSEBUTTONUP) {
-        if (event.button.button == SDL_BUTTON_LEFT) {
-            cursorDragging = false;
+        if (event.button.button == SDL_BUTTON_LEFT || event.button.button == SDL_BUTTON_RIGHT) {
+            for (auto& cursor : cursors) {
+                cursor.dragging = false;
+            }
+            activeCursorIndex = -1;
         }
     }
-    else if (event.type == SDL_MOUSEMOTION && cursorDragging) {
-        if (showCursor) {
-            cursorX = x;
-            cursorY = y;
+    else if (event.type == SDL_MOUSEMOTION) {
+        if (activeCursorIndex != -1 && cursors[activeCursorIndex].dragging) {
+            cursors[activeCursorIndex].x = x;
+            cursors[activeCursorIndex].y = y;
 
             // Constrain cursor to plot area
-            if (cursorX < plotArea.x) cursorX = plotArea.x;
-            if (cursorX > plotArea.x + plotArea.w) cursorX = plotArea.x + plotArea.w;
-            if (cursorY < plotArea.y) cursorY = plotArea.y;
-            if (cursorY > plotArea.y + plotArea.h) cursorY = plotArea.y + plotArea.h;
+            if (cursors[activeCursorIndex].x < plotArea.x) cursors[activeCursorIndex].x = plotArea.x;
+            if (cursors[activeCursorIndex].x > plotArea.x + plotArea.w) cursors[activeCursorIndex].x = plotArea.x + plotArea.w;
+            if (cursors[activeCursorIndex].y < plotArea.y) cursors[activeCursorIndex].y = plotArea.y;
+            if (cursors[activeCursorIndex].y > plotArea.y + plotArea.h) cursors[activeCursorIndex].y = plotArea.y + plotArea.h;
 
             // Calculate cursor values
             double timeRange = maxTime - minTime;
             double valueRange = maxValue - minValue;
-            cursorTime = minTime + (cursorX - plotArea.x) * timeRange / plotArea.w;
-            cursorValue = maxValue - (cursorY - plotArea.y) * valueRange / plotArea.h;
+            cursors[activeCursorIndex].time = minTime + (cursors[activeCursorIndex].x - plotArea.x) * timeRange / plotArea.w;
+            cursors[activeCursorIndex].value = maxValue - (cursors[activeCursorIndex].y - plotArea.y) * valueRange / plotArea.h;
         }
     }
     else if (event.type == SDL_KEYDOWN) {
         if (event.key.keysym.sym == SDLK_k) {
-            showCursor = !showCursor;
-            if (!showCursor) {
-                cursorDragging = false;
+            // Toggle all cursors
+            bool anyActive = false;
+            for (auto& cursor : cursors) {
+                if (cursor.active) anyActive = true;
+            }
+            for (auto& cursor : cursors) {
+                cursor.active = !anyActive;
             }
         }
-        else if (event.key.keysym.sym == SDLK_ESCAPE && showCursor) {
-            showCursor = false;
-            cursorDragging = false;
+        else if (event.key.keysym.sym == SDLK_ESCAPE) {
+            // Clear all cursors
+            for (auto& cursor : cursors) {
+                cursor.active = false;
+                cursor.dragging = false;
+            }
+            activeCursorIndex = -1;
+        }
+        else if (event.key.keysym.sym == SDLK_DELETE && activeCursorIndex != -1) {
+            // Delete active cursor
+            if (cursors.size() > 1) {
+                cursors.erase(cursors.begin() + activeCursorIndex);
+                activeCursorIndex = -1;
+            } else {
+                cursors[0].active = false;
+            }
         }
     }
 }
-
 class Circuit {
 public:
     vector<Component*> components;
@@ -1104,78 +1169,61 @@ public:
 
 
             // Add cursor drawing logic
-        if (showCursor && cursorX >= area.x && cursorX <= area.x + area.w &&
-            cursorY >= area.y && cursorY <= area.y + area.h) {
+        // In your drawLTspiceStylePlot function, replace the single cursor drawing code:
+        for (const auto& cursor : cursors) {
+            if (cursor.active && cursor.x >= area.x && cursor.x <= area.x + area.w &&
+                cursor.y >= area.y && cursor.y <= area.y + area.h) {
 
-            // Draw vertical cursor line
-            SDL_SetRenderDrawColor(renderer, 204, 153, 0, 128); // Yellow with transparency
-            SDL_RenderDrawLine(renderer, cursorX, area.y, cursorX, area.y + area.h);
+                // Draw vertical cursor line
+                SDL_SetRenderDrawColor(renderer, cursor.color.r, cursor.color.g, cursor.color.b, cursor.color.a);
+                SDL_RenderDrawLine(renderer, cursor.x, area.y, cursor.x, area.y + area.h);
 
-            // Draw horizontal cursor line
-            SDL_RenderDrawLine(renderer, area.x, cursorY, area.x + area.w, cursorY);
+                // Draw horizontal cursor line
+                SDL_RenderDrawLine(renderer, area.x, cursor.y, area.x + area.w, cursor.y);
 
-            // Calculate cursor values
-            cursorTime = minTime + (cursorX - area.x) * timeRange / area.w;
-            cursorValue = maxValue - (cursorY - area.y) * valueRange / area.h;
+                // Draw cursor information box
+                SDL_Rect infoBox = {cursor.x + 10, cursor.y - 80, 180, 70};
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
+                SDL_RenderFillRect(renderer, &infoBox);
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+                SDL_RenderDrawRect(renderer, &infoBox);
 
-            // Draw cursor information box
-            SDL_Rect infoBox = {cursorX + 10, cursorY - 80, 180, 70};
-            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
-            SDL_RenderFillRect(renderer, &infoBox);
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            SDL_RenderDrawRect(renderer, &infoBox);
+                string timeStr = "Time: " + to_string(cursor.time).substr(0, 8) + "s";
+                string valueStr = "Value: " + to_string(cursor.value).substr(0, 8);
 
-            string timeStr = "Time: " + to_string(cursorTime).substr(0, 8) + "s";
-            string valueStr = "Value: " + to_string(cursorValue).substr(0, 8);
+                renderText(timeStr, infoBox.x + 5, infoBox.y + 5, WHITE);
+                renderText(valueStr, infoBox.x + 5, infoBox.y + 25, WHITE);
 
-            renderText(timeStr, infoBox.x + 5, infoBox.y + 5, WHITE);
-            renderText(valueStr, infoBox.x + 5, infoBox.y + 25, WHITE);
+                // Draw cursor position indicators on axes
+                SDL_SetRenderDrawColor(renderer, cursor.color.r, cursor.color.g, cursor.color.b, 255);
 
-            // Find closest data point
-            if (!Vtimes.empty()) {
-                double minDistance = numeric_limits<double>::max();
-                size_t closestIndex = 0;
-                double closestValue = 0;
+                // Time axis indicator
+                SDL_Rect timeIndicator = {cursor.x, area.y + area.h - 5, 1, 10};
+                SDL_RenderFillRect(renderer, &timeIndicator);
 
-                for (size_t i = 0; i < Vtimes.size(); i++) {
-                    double distance = abs(Vtimes[i] - cursorTime);
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        closestIndex = i;
-                        closestValue = voltages[i];
-                    }
-                }
+                // Add this after drawing all cursors to show differences
 
-                // Draw point highlight
-                int pointX = area.x + static_cast<int>((Vtimes[closestIndex] - minTime) / timeRange * area.w);
-                int pointY = area.y + area.h - static_cast<int>((voltages[closestIndex] - minValue) / valueRange * area.h);
-
-                SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-                for (int i = -5; i <= 5; i++) {
-                    for (int j = -5; j <= 5; j++) {
-                        if (i*i + j*j <= 25) {
-                            SDL_RenderDrawPoint(renderer, pointX + i, pointY + j);
-                        }
-                    }
-                }
-
-                // Add point information
-                string pointInfo = "Point: " + to_string(closestValue).substr(0, 8);
-                renderText(pointInfo, infoBox.x + 5, infoBox.y + 45, WHITE);
+                // Value axis indicator
+                SDL_Rect valueIndicator = {area.x - 10, cursor.y, 10, 1};
+                SDL_RenderFillRect(renderer, &valueIndicator);
             }
-
-            // Draw cursor position indicators on axes
-            SDL_SetRenderDrawColor(renderer, 255, 255, 0, 255);
-
-            // Time axis indicator
-            SDL_Rect timeIndicator = {cursorX, area.y + area.h - 5, 1, 10};
-            SDL_RenderFillRect(renderer, &timeIndicator);
-
-            // Value axis indicator
-            SDL_Rect valueIndicator = {area.x - 10, cursorY, 10, 1};
-            SDL_RenderFillRect(renderer, &valueIndicator);
         }
+        if (cursors.size() >= 2 && cursors[0].active && cursors[1].active) {
+            double timeDelta = abs(cursors[1].time - cursors[0].time);
+            double valueDelta = abs(cursors[1].value - cursors[0].value);
 
+            SDL_Rect deltaBox = {area.x + 10, area.y + 10, 200, 60};
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
+            SDL_RenderFillRect(renderer, &deltaBox);
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_RenderDrawRect(renderer, &deltaBox);
+
+            string deltaTimeStr = "ΔTime: " + to_string(timeDelta).substr(0, 8) + "s";
+            string deltaValueStr = "ΔValue: " + to_string(valueDelta).substr(0, 8);
+
+            renderText(deltaTimeStr, deltaBox.x + 5, deltaBox.y + 5, WHITE);
+            renderText(deltaValueStr, deltaBox.x + 5, deltaBox.y + 25, WHITE);
+        }
     }
 
 
@@ -4020,6 +4068,8 @@ void renderShortcutHelp(SDL_Renderer* renderer) {
 }
 
 int main(int argc, char* argv[]) {
+    // Initialize with one cursor
+    cursors.push_back({-1, -1, 0.0, 0.0, false, {204, 153, 0, 128}, false});
     changeToPreviousDirectory();
     renderStatus(renderer);
     double timeZoom = 1.0;
@@ -4055,9 +4105,10 @@ int main(int argc, char* argv[]) {
 
         while (SDL_PollEvent(&event)) {
 
+            // Replace the existing cursor handling in main event loop
             if (!Vtimes.empty() && !voltages.empty()) {
                 double minTime = *min_element(Vtimes.begin(), Vtimes.end());
-                double maxTime = *max_element(Vtimes.begin() , Vtimes.end());
+                double maxTime = *max_element(Vtimes.begin(), Vtimes.end());
                 double minValue = *min_element(voltages.begin(), voltages.end());
                 double maxValue = *max_element(voltages.begin(), voltages.end());
 
