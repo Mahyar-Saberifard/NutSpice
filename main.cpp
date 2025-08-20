@@ -64,7 +64,6 @@ struct Cursor {
     bool dragging;
 };
 
-
 vector<Cursor> cursors;
 int activeCursorIndex = -1;
 
@@ -88,8 +87,10 @@ bool textInputActive = false;
 bool FileDialog = false;
 bool SaveAsDialog = false;
 
-vector<string> listTxtFiles(const string& directory) {
+vector<string> listCircuitFiles(const string& directory) {
     vector<string> files;
+
+    // Get .txt files
 #ifdef _WIN32
     WIN32_FIND_DATA findData;
     HANDLE hFind = FindFirstFile((directory + "\\*.txt").c_str(), &findData);
@@ -114,6 +115,31 @@ vector<string> listTxtFiles(const string& directory) {
         closedir(dir);
     }
 #endif
+
+    // Get .cir files
+#ifdef _WIN32
+    hFind = FindFirstFile((directory + "\\*.cir").c_str(), &findData);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                files.push_back(findData.cFileName);
+            }
+        } while (FindNextFile(hFind, &findData) != 0);
+        FindClose(hFind);
+    }
+#else
+    dir = opendir(directory.c_str());
+    if (dir) {
+        while ((ent = readdir(dir))) {
+            string filename = ent->d_name;
+            if (filename.length() > 4 && filename.substr(filename.length() - 4) == ".cir") {
+                files.push_back(filename);
+            }
+        }
+        closedir(dir);
+    }
+#endif
+
     return files;
 }
 
@@ -2977,6 +3003,30 @@ public:
 };
 
 void processCircuitFile(const string& filename, Circuit& circuit) {
+    string extension = filename.substr(filename.find_last_of(".") + 1);
+    transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+    if (extension == "cir") {
+        // Load binary circuit file
+        if (!circuit.loadFromFile(filename)) {
+            cerr << "Error: Could not load circuit file '" << filename << "'" << endl;
+            char cwd[MAX_PATH];
+            if (GETCWD(cwd, sizeof(cwd))) {
+                cerr << "Current working directory: " << cwd << endl;
+            }
+        } else {
+            cout << "Successfully loaded circuit from: " << filename << endl;
+
+            // Update the global node information from the loaded circuit
+            nodeMap = circuit.nodeMap;
+            reverseNodeMap = circuit.reverseNodeMap;
+            nextNodeNumber = circuit.nextNodeNumber;
+            nodePositions = circuit.nodePositions;
+        }
+        return;
+    }
+
+    // Original .txt processing code for SPICE files
     ifstream file(filename);
     if (!file.is_open()) {
         string withExtension = filename;
@@ -3247,22 +3297,6 @@ string ensureExtension(const string& filename) {
     return filename;
 }
 
-vector<string> listCircuitFiles(const string& directory) {
-    vector<string> files;
-    // Similar to your listTxtFiles but look for .cir files
-    WIN32_FIND_DATA findData;
-    HANDLE hFind = FindFirstFile((directory + "\\*.cir").c_str(), &findData);
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                files.push_back(findData.cFileName);
-            }
-        } while (FindNextFile(hFind, &findData) != 0);
-        FindClose(hFind);
-    }
-    return files;
-}
-
 template<class Archive>
 void Circuit::save(Archive &archive) const {
     // Save component count
@@ -3499,6 +3533,12 @@ void showFileDialog(SDL_Renderer* renderer, const vector<string>& files) {
         SDL_Rect fileRect = {fileList.x + 10, fileList.y + 10 + (int)i*30, fileList.w - 20, 25};
         SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
         SDL_RenderFillRect(renderer, &fileRect);
+        string displayName = files[i];
+        if (files[i].find(".cir") != string::npos) {
+            displayName += " [Circuit]";
+        } else if (files[i].find(".txt") != string::npos) {
+            displayName += " [SPICE]";
+        }
         renderText(files[i], fileRect.x + 5, fileRect.y + 5, currentTheme.text);
     }
 
@@ -4390,7 +4430,7 @@ int main(int argc, char* argv[]) {
     }
 
     TextBox* activeTextBox = nullptr;
-    vector<string> txtFiles = listTxtFiles(".");
+    vector<string> circuitFiles = listCircuitFiles(".");
 
     nodePositions[0] = {100, 500};
     reverseNodeMap[0] = "GND";
@@ -4503,7 +4543,8 @@ int main(int argc, char* argv[]) {
                         }
                         else if (y >= fileMenuRect.y + 80 && y <= fileMenuRect.y + 110) {
                             FileDialog = true;
-                            txtFiles = listTxtFiles(".");
+                            circuitFiles = listCircuitFiles(".");
+                            FileMenu = false;
                         }
                         else if (y >= fileMenuRect.y + 120 && y <= fileMenuRect.y + 150) {
                             if (!currentCircuitFile.empty()) {
@@ -4633,26 +4674,38 @@ int main(int argc, char* argv[]) {
 
                 if (FileDialog) {
                     SDL_Rect dialog = {200, 150, 400, 400};
-                    if (x >= dialog.x + 100 && x <= dialog.x + 200 &&
-                        y >= dialog.y + 330 && y <= dialog.y + 370) {
-                        for (size_t i = 0; i < txtFiles.size(); i++) {
-                            SDL_Rect fileRect = {dialog.x + 20, dialog.y + 60 + (int)i * 30, 360, 25};
-                            if (x >= fileRect.x && x <= fileRect.x + fileRect.w &&
-                                y >= fileRect.y && y <= fileRect.y + fileRect.h) {
-                                resetGlobalState();
-                                delete circuit;
-                                circuit = new Circuit();
-                                processCircuitFile(txtFiles[i], *circuit);
-                                currentCircuitFile = txtFiles[i];
-                                calculateNodePositions(*circuit);
-                                FileDialog = false;
-                                break;
+
+                    // First check if user clicked on a file item
+                    bool fileClicked = false;
+                    for (size_t i = 0; i < circuitFiles.size(); i++) {
+                        SDL_Rect fileRect = {dialog.x + 20, dialog.y + 60 + (int)i * 30, 360, 25};
+                        if (x >= fileRect.x && x <= fileRect.x + fileRect.w &&
+                            y >= fileRect.y && y <= fileRect.y + fileRect.h) {
+                            resetGlobalState();
+                            delete circuit;
+                            circuit = new Circuit();
+                            processCircuitFile(circuitFiles[i], *circuit);
+                            currentCircuitFile = circuitFiles[i];
+                            calculateNodePositions(*circuit);
+                            FileDialog = false;
+                            fileClicked = true;
+                            break;
                             }
-                        }
                     }
-                    else if (x >= dialog.x + 220 && x <= dialog.x + 320 &&
-                             y >= dialog.y + 330 && y <= dialog.y + 370) {
-                        FileDialog = false;
+
+                    // If no file was clicked, check for button clicks
+                    if (!fileClicked) {
+                        if (x >= dialog.x + 100 && x <= dialog.x + 200 &&
+                            y >= dialog.y + 330 && y <= dialog.y + 370) {
+                            // Open button clicked - but we already handled file clicks above
+                            // This would be for a default file or other logic
+                            FileDialog = false;
+                            }
+                        else if (x >= dialog.x + 220 && x <= dialog.x + 320 &&
+                                 y >= dialog.y + 330 && y <= dialog.y + 370) {
+                            // Cancel button clicked
+                            FileDialog = false;
+                                 }
                     }
                     continue;
                 }
@@ -4705,10 +4758,6 @@ int main(int argc, char* argv[]) {
                     textInputActive = false;
                     inputText = "";
                 }
-
-
-
-
             }
             else if (event.type == SDL_MOUSEWHEEL) {
                 if (SDL_GetModState() & KMOD_CTRL) {
@@ -4891,7 +4940,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (FileDialog) {
-            showFileDialog(renderer, txtFiles);
+            showFileDialog(renderer, circuitFiles);
         }
 
         if (SaveAsDialog) {
