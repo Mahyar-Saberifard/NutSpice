@@ -4431,8 +4431,6 @@ int main(int argc, char* argv[]) {
         }
 
         while (SDL_PollEvent(&event)) {
-
-            // Replace the existing cursor handling in main event loop
             if (!Vtimes.empty() && !voltages.empty()) {
                 double minTime = *min_element(Vtimes.begin(), Vtimes.end());
                 double maxTime = *max_element(Vtimes.begin(), Vtimes.end());
@@ -4882,7 +4880,6 @@ int main(int argc, char* argv[]) {
 
         SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
         SDL_RenderClear(renderer);
-
 
         SDL_SetRenderDrawColor(renderer, currentTheme.circuitBg.r, currentTheme.circuitBg.g, currentTheme.circuitBg.b, 255);
         SDL_RenderFillRect(renderer, &circuitArea);
