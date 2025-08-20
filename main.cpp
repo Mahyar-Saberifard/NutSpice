@@ -27,43 +27,14 @@
 using namespace std;
 
 namespace cereal {
-    // For std::pair<int, int>
     template <class Archive>
     void serialize(Archive& archive, std::pair<int, int>& pair) {
         archive(pair.first, pair.second);
     }
 
-    // For SDL_Point
     template <class Archive>
     void serialize(Archive& archive, SDL_Point& point) {
         archive(point.x, point.y);
-    }
-
-    // For std::unordered_map<string, int>
-    template <class Archive>
-    void serialize(Archive& archive, std::unordered_map<std::string, int>& map) {
-        archive(map.size());
-        for (auto& pair : map) {
-            archive(pair.first, pair.second);
-        }
-    }
-
-    // For std::unordered_map<int, string>
-    template <class Archive>
-    void serialize(Archive& archive, std::unordered_map<int, std::string>& map) {
-        archive(map.size());
-        for (auto& pair : map) {
-            archive(pair.first, pair.second);
-        }
-    }
-
-    // For std::map<int, SDL_Point>
-    template <class Archive>
-    void serialize(Archive& archive, std::map<int, SDL_Point>& map) {
-        archive(map.size());
-        for (auto& pair : map) {
-            archive(pair.first, pair.second);
-        }
     }
 }
 
