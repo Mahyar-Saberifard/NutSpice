@@ -15,8 +15,57 @@
 #include <SDL2/SDL_ttf.h>
 #include <unordered_set>
 #include <memory>
+#include <cereal/types/unordered_map.hpp>
+#include <cereal/archives/xml.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/string.hpp>
+#include <cereal/types/map.hpp>
+#include <cereal/types/memory.hpp>
+#include <cereal/archives/binary.hpp>
+#include <fstream>
 
 using namespace std;
+
+namespace cereal {
+    // For std::pair<int, int>
+    template <class Archive>
+    void serialize(Archive& archive, std::pair<int, int>& pair) {
+        archive(pair.first, pair.second);
+    }
+
+    // For SDL_Point
+    template <class Archive>
+    void serialize(Archive& archive, SDL_Point& point) {
+        archive(point.x, point.y);
+    }
+
+    // For std::unordered_map<string, int>
+    template <class Archive>
+    void serialize(Archive& archive, std::unordered_map<std::string, int>& map) {
+        archive(map.size());
+        for (auto& pair : map) {
+            archive(pair.first, pair.second);
+        }
+    }
+
+    // For std::unordered_map<int, string>
+    template <class Archive>
+    void serialize(Archive& archive, std::unordered_map<int, std::string>& map) {
+        archive(map.size());
+        for (auto& pair : map) {
+            archive(pair.first, pair.second);
+        }
+    }
+
+    // For std::map<int, SDL_Point>
+    template <class Archive>
+    void serialize(Archive& archive, std::map<int, SDL_Point>& map) {
+        archive(map.size());
+        for (auto& pair : map) {
+            archive(pair.first, pair.second);
+        }
+    }
+}
 
 #ifdef _WIN32
 #define GETCWD _getcwd
@@ -61,6 +110,12 @@ int cursorY = -1;
 double cursorTime = 0.0;
 double cursorValue = 0.0;
 bool cursorDragging = false;
+bool running = true;
+SDL_Event event;
+string inputText = "";
+bool textInputActive = false;
+bool FileDialog = false;
+bool SaveAsDialog = false;
 
 vector<string> listTxtFiles(const string& directory) {
     vector<string> files;
@@ -1383,10 +1438,28 @@ public:
         }
     }
 
-    static double getTimeStep() { return currentTimeStep; }
+    template <class Archive>
+    void save(Archive& archive) const;
 
-    static double getTime() { return currentTime; }
+    template <class Archive>
+    void load (Archive& archive);
 
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            components,
+            maxNode,
+            wireConnections,
+            nodePositions,
+            nodeMap,
+            reverseNodeMap,
+            nextNodeNumber
+        );
+    }
+
+    void saveToFile(const string& filename) const;
+
+    bool loadFromFile(const string& filename);
 };
 
 void Circuit::calculateNodePositions(){
@@ -1566,6 +1639,13 @@ public:
     Component* clone() const override {
         return new Resistor(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, value
+        );
+    }
 };
 
 class Capacitor : public Component {
@@ -1582,7 +1662,7 @@ public:
                vector<double>& J,
                vector<double>&,
                int&) override {
-        double geq = value / Circuit::getTimeStep();
+        double geq = value / Circuit::currentTimeStep;
 
         if (node1 != 0) {
             G[node1-1][node1-1] += geq;
@@ -1664,6 +1744,13 @@ public:
     Component* clone() const override {
         return new Capacitor(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, value
+        );
+    }
 };
 
 class Inductor : public Component {
@@ -1683,7 +1770,7 @@ public:
                int& nextVariable) override {
         index = nextVariable++;
 
-        double dt = Circuit::getTimeStep();
+        double dt = Circuit::currentTimeStep;
         double L = value;
 
         double Leq = L / dt;
@@ -1778,6 +1865,13 @@ public:
 
     Component* clone() const override {
         return new Inductor(*this);
+    }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, value
+        );
     }
 };
 
@@ -1903,6 +1997,13 @@ public:
     Component* clone() const override {
         return new Diode(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2
+        );
+    }
 };
 
 class Ground : public Component {
@@ -1944,6 +2045,13 @@ public:
 
     Component* clone() const override {
         return new Ground(*this);
+    }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2
+        );
     }
 };
 
@@ -2011,6 +2119,13 @@ public:
     Component* clone() const override {
         return new VoltageSource(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, value
+        );
+    }
 };
 
 class SinVoltageSource : public Component {
@@ -2038,7 +2153,7 @@ public:
         if (node1 != 0) C[vsIndex][node1-1] = 1;
         if (node2 != 0) C[vsIndex][node2-1] = -1;
 
-        double t = Circuit::getTime();
+        double t = Circuit::currentTime;
         double radians = phase * M_PI / 180.0;
         E[vsIndex] = offset + amplitude * sin(2 * M_PI * frequency * t + radians);
     }
@@ -2102,6 +2217,13 @@ public:
     Component* clone() const override {
         return new SinVoltageSource(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
+        );
+    }
 };
 
 class PulseVoltageSource : public Component {
@@ -2127,7 +2249,7 @@ public:
         if (node1 != 0) C[vsIndex][node1-1] = 1;
         if (node2 != 0) C[vsIndex][node2-1] = -1;
 
-        double t = Circuit::getTime();
+        double t = Circuit::currentTime;
         double cycleTime = fmod(t - td, per);
 
         if (t < td) {
@@ -2203,6 +2325,13 @@ public:
     Component* clone() const override {
         return new PulseVoltageSource(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, v1, v2, td, tf, tr, pw, per
+        );
+    }
 };
 
 class CurrentSource : public Component {
@@ -2264,6 +2393,13 @@ public:
     Component* clone() const override {
         return new CurrentSource(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, value
+        );
+    }
 };
 
 class SinCurrentSource : public Component {
@@ -2283,7 +2419,7 @@ public:
                vector<double>& J,
                vector<double>& E,
                int& nextVariable) override {
-        double t = Circuit::getTime();
+        double t = Circuit::currentTime;
         double radians = phase * M_PI / 180.0;
         double i = offset + amplitude * sin(2 * M_PI * frequency * t + radians);
 
@@ -2350,6 +2486,13 @@ public:
     Component* clone() const override {
         return new SinCurrentSource(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
+        );
+    }
 };
 
 class PulseCurrentSource : public Component {
@@ -2367,7 +2510,7 @@ public:
                vector<double>& J,
                vector<double>& E,
                int& nextVariable) override {
-        double t = Circuit::getTime();
+        double t = Circuit::currentTime;
         double cycleTime = fmod(t - td, per);
         double i = i1;
 
@@ -2444,6 +2587,13 @@ public:
 
     Component* clone() const override {
         return new PulseCurrentSource(*this);
+    }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, i1, i2, td, tr, tf, pw, per
+        );
     }
 };
 
@@ -2552,6 +2702,13 @@ public:
     Component* clone() const override {
         return new VCVS(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
+        );
+    }
 };
 
 class CCVS : public Component {
@@ -2635,6 +2792,13 @@ public:
 
     Component* clone() const override {
         return new CCVS(*this);
+    }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
+        );
     }
 };
 
@@ -2742,6 +2906,13 @@ public:
     Component* clone() const override {
         return new VCCS(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
+        );
+    }
 };
 
 class CCCS : public Component {
@@ -2825,22 +2996,14 @@ public:
     Component* clone() const override {
         return new CCCS(*this);
     }
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+            type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
+        );
+    }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 void processCircuitFile(const string& filename, Circuit& circuit) {
     ifstream file(filename);
@@ -3104,6 +3267,179 @@ vector<Circuit*> undoStack;
 vector<Circuit*> redoStack;
 string copiedComponent;
 
+const string CIRCUIT_EXTENSION = ".cir";
+
+string ensureExtension(const string& filename) {
+    if (filename.find('.') == string::npos) {
+        return filename + CIRCUIT_EXTENSION;
+    }
+    return filename;
+}
+
+vector<string> listCircuitFiles(const string& directory) {
+    vector<string> files;
+    // Similar to your listTxtFiles but look for .cir files
+    WIN32_FIND_DATA findData;
+    HANDLE hFind = FindFirstFile((directory + "\\*.cir").c_str(), &findData);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                files.push_back(findData.cFileName);
+            }
+        } while (FindNextFile(hFind, &findData) != 0);
+        FindClose(hFind);
+    }
+    return files;
+}
+
+template<class Archive>
+void Circuit::save(Archive &archive) const {
+    // Save component count
+    archive(components.size());
+
+    // Save each component with type information
+    for (const auto& comp : components) {
+        archive(comp->getType());
+
+        // Save component-specific data
+        if (auto resistor = dynamic_cast<Resistor*>(comp)) {
+            archive(*resistor);
+        } else if (auto capacitor = dynamic_cast<Capacitor*>(comp)) {
+            archive(*capacitor);
+        } else if (auto inductor = dynamic_cast<Inductor*>(comp)) {
+            archive(*inductor);
+        } else if (auto voltageSource = dynamic_cast<VoltageSource*>(comp)) {
+            archive(*voltageSource);
+        } else if (auto currentSource = dynamic_cast<CurrentSource*>(comp)) {
+            archive(*currentSource);
+        } else if (auto diode = dynamic_cast<Diode*>(comp)) {
+            archive(*diode);
+        } else if (auto ground = dynamic_cast<Ground*>(comp)) {
+            archive(*ground);
+        }
+        // Add other component types...
+    }
+
+    // Save circuit data
+    archive(
+        maxNode,
+        wireConnections,
+        nodePositions,
+        nodeMap,
+        reverseNodeMap,
+        nextNodeNumber
+    );
+}
+
+template <class Archive>
+void Circuit::load(Archive& archive) {
+    // Clear existing components
+    for (auto comp : components) {
+        delete comp;
+    }
+    components.clear();
+
+    // Load component count
+    size_t numComponents;
+    archive(numComponents);
+
+    // Load each component
+    for (size_t i = 0; i < numComponents; i++) {
+        string type;
+        archive(type);
+
+        Component* comp = nullptr;
+        if (type == "Resistor") {
+            Resistor* resistor = new Resistor("", 0, 0, 0);
+            archive(*resistor);
+            comp = resistor;
+        } else if (type == "Capacitor") {
+            Capacitor* capacitor = new Capacitor("", 0, 0, 0);
+            archive(*capacitor);
+            comp = capacitor;
+        } else if (type == "Inductor") {
+            Inductor* inductor = new Inductor("", 0, 0, 0);
+            archive(*inductor);
+            comp = inductor;
+        } else if (type == "VoltageSource") {
+            VoltageSource* vs = new VoltageSource("", 0, 0, 0);
+            archive(*vs);
+            comp = vs;
+        } else if (type == "CurrentSource") {
+            CurrentSource* cs = new CurrentSource("", 0, 0, 0);
+            archive(*cs);
+            comp = cs;
+        } else if (type == "Diode") {
+            Diode* diode = new Diode("", 0, 0);
+            archive(*diode);
+            comp = diode;
+        } else if (type == "Ground") {
+            Ground* ground = new Ground("", 0);
+            archive(*ground);
+            comp = ground;
+        } else if (type == "SinVoltageSource") {
+            SinVoltageSource* svs = new SinVoltageSource("", 0, 0, 0, 0, 0, 0);
+            archive(*svs);
+            comp = svs;
+        } else if (type == "SinCurrentSource") {
+            SinCurrentSource* css = new SinCurrentSource("", 0, 0, 0, 0, 0, 0);
+            archive(*css);
+            comp = css;
+        } else if (type == "PulseVoltageSource") {
+            PulseVoltageSource* pvs = new PulseVoltageSource("", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            archive(*pvs);
+            comp = pvs;
+        } else if (type == "PulseCurrentSource") {
+            PulseCurrentSource* pcs = new PulseCurrentSource("", 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            archive(*pcs);
+            comp = pcs;
+        }
+
+        if (comp) {
+            components.push_back(comp);
+        }
+    }
+
+    // Load circuit data
+    archive(
+        maxNode,
+        wireConnections,
+        nodePositions,
+        nodeMap,
+        reverseNodeMap,
+        nextNodeNumber
+    );
+}
+
+void Circuit::saveToFile(const string& filename) const {
+    try {
+        std::ofstream ofs(filename, std::ios::binary);
+        cereal::BinaryOutputArchive archive(ofs);
+        save(archive);
+        cout << "Circuit saved successfully to: " << filename << endl;
+    } catch (const std::exception& e) {
+        cerr << "Error saving circuit: " << e.what() << endl;
+    }
+}
+
+bool Circuit::loadFromFile(const string& filename) {
+    try {
+        std::ifstream ifs(filename, std::ios::binary);
+        if (!ifs.is_open()) {
+            cerr << "Could not open file: " << filename << endl;
+            return false;
+        }
+
+        cereal::BinaryInputArchive archive(ifs);
+        load(archive);
+        cout << "Circuit loaded successfully from: " << filename << endl;
+        return true;
+    } catch (const std::exception& e) {
+        cerr << "Error loading circuit: " << e.what() << endl;
+        return false;
+    }
+}
+
 void saveUndoState(Circuit*& currentCircuit) {
     for (auto circuit : redoStack) {
         delete circuit;
@@ -3320,35 +3656,6 @@ bool isPointNearLine(int px, int py, int x1, int y1, int x2, int y2, int thresho
 
 bool isMouseOver(const SDL_Rect& rect, int x, int y) {
     return (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h);
-}
-
-void handleSaveButton(Circuit* circuit, const string& currentCircuitFile) {
-    if (!circuit) return;
-
-    if (currentCircuitFile.empty()) {
-        cout << "No current circuit file specified!" << endl;
-        return;
-    }
-
-    if (saveCircuitToFile(*circuit, currentCircuitFile)) {
-        cout << "Circuit saved to " << currentCircuitFile << endl;
-    } else {
-        cout << "Failed to save circuit!" << endl;
-    }
-}
-
-void handleLoadButton(Circuit*& circuit, string& currentCircuitFile) {
-    if (currentCircuitFile.empty()) {
-        cout << "No circuit file to load!" << endl;
-        return;
-    }
-
-    resetGlobalState();
-    delete circuit;
-    circuit = new Circuit();
-
-    processCircuitFile(currentCircuitFile, *circuit);
-    cout << "Reloaded circuit from " << currentCircuitFile << endl;
 }
 
 void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
@@ -4067,8 +4374,28 @@ void renderShortcutHelp(SDL_Renderer* renderer) {
     renderText("ESC - Cancel placement", 20, y, currentTheme.text); y += 25;
 }
 
+void handleSaveButton(Circuit* circuit, string& currentCircuitFile) {
+    if (currentCircuitFile.empty()) {
+        // Show save dialog
+        SaveAsDialog = true;
+    } else {
+        circuit->saveToFile(ensureExtension(currentCircuitFile));
+    }
+}
+
+void handleLoadButton(Circuit*& circuit, string& currentCircuitFile, const string& filename) {
+    Circuit* newCircuit = new Circuit();
+    if (newCircuit->loadFromFile(ensureExtension(filename))) {
+        delete circuit;
+        circuit = newCircuit;
+        currentCircuitFile = filename;
+        calculateNodePositions(*circuit);
+    } else {
+        delete newCircuit;
+    }
+}
+
 int main(int argc, char* argv[]) {
-    // Initialize with one cursor
     cursors.push_back({-1, -1, 0.0, 0.0, false, {204, 153, 0, 128}, false});
     changeToPreviousDirectory();
     renderStatus(renderer);
@@ -4077,7 +4404,6 @@ int main(int argc, char* argv[]) {
     double timePan = 0.0;
     double valuePan = 0.0;
 
-
     string currentCircuitFile = "";
     Circuit* circuit = new Circuit();
 
@@ -4085,14 +4411,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    bool running = true;
-    SDL_Event event;
-    string inputText = "";
-    bool textInputActive = false;
     TextBox* activeTextBox = nullptr;
     vector<string> txtFiles = listTxtFiles(".");
-    bool FileDialog = false;
-    bool SaveAsDialog = false;
 
     nodePositions[0] = {100, 500};
     reverseNodeMap[0] = "GND";
