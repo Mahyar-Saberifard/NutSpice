@@ -3316,8 +3316,15 @@ void Circuit::save(Archive &archive) const {
             archive(*diode);
         } else if (auto ground = dynamic_cast<Ground*>(comp)) {
             archive(*ground);
+        } else if (auto sinVoltageSource = dynamic_cast<SinVoltageSource*>(comp)) {
+            archive(*sinVoltageSource);
+        } else if (auto sinCurrentSource = dynamic_cast<SinCurrentSource*>(comp)) {
+            archive(*sinCurrentSource);
+        } else if (auto pulseVoltageSource = dynamic_cast<PulseVoltageSource*>(comp)) {
+            archive(*pulseVoltageSource);
+        } else if (auto pulseCurrentSource = dynamic_cast<PulseCurrentSource*>(comp)) {
+            archive(*pulseCurrentSource);
         }
-        // Add other component types...
     }
 
     // Save circuit data
