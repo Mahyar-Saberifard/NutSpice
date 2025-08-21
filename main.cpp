@@ -85,8 +85,6 @@ struct Cursor {
     bool dragging;
 };
 
-
-
 vector<Cursor> cursors;
 int activeCursorIndex = -1;
 
@@ -233,6 +231,8 @@ SDL_Rect fileMenuRect = {10, 45, 140, 250};
 SDL_Rect editMenuRect = {100, 45, 140, 250};
 
 TextBox valueBox = {{10, SCREEN_HEIGHT - 60, 100, 40}, "Value", false};
+TextBox stepBox = {400, 210, 150, 30, to_string(tStep)};
+TextBox stopBox = {400, 260, 150, 30, to_string(tStop)};
 TextBox nameBox = {{300, 210, 180, 30}, "Name", false};
 
 bool darkMode = false;
@@ -274,24 +274,23 @@ bool showSources = false;
 bool showSemis = false;
 bool showDependents = false;
 
-Button darkModeBtn = {460, 5, 100, 30, "Dark Mode", currentTheme.button};
-Button passiveBtn = {870, 50, 120, 40, "Passives", currentTheme.button};
-Button sourcesBtn = {870, 100, 120, 40, "Sources", currentTheme.button};
-Button semiBtn = {870, 150, 120, 40, "Semiconductors", currentTheme.button};
-Button depBtn = {870, 200, 120, 40, "Dependent", currentTheme.button};
+Button darkModeBtn = {460, 5, 160, 30, "Dark Mode", currentTheme.button};
+Button passiveBtn;
+Button sourcesBtn;
+Button semiBtn;
+Button depBtn;
 
-Button resBtn = {1000, 100, 120, 40, "Resistor", currentTheme.button};
-Button capBtn = {1000, 150, 120, 40, "Capacitor", currentTheme.button};
-Button indBtn = {1000, 200, 120, 40, "Inductor", currentTheme.button};
-Button diodeBtn = {1000, 250, 120, 40, "Diode", currentTheme.button};
-Button vSrcBtn = {1000, 100, 120, 40, "V Source", currentTheme.button};
-Button iSrcBtn = {1000, 150, 120, 40, "I Source", currentTheme.button};
-Button gndBtn = {1000, 200, 120, 40, "Ground", currentTheme.button};
-Button vcvsBtn = {1000, 250, 120, 40, "VCVS", currentTheme.button};
-Button vccsBtn = {1000, 300, 120, 40, "VCCS", currentTheme.button};
-Button ccvsBtn = {1000, 350, 120, 40, "CCVS", currentTheme.button};
-Button cccsBtn = {1000, 400, 120, 40, "CCCS", currentTheme.button};
-
+Button resBtn;
+Button capBtn;
+Button indBtn;
+Button diodeBtn;
+Button vSrcBtn;
+Button iSrcBtn;
+Button gndBtn;
+Button vcvsBtn;
+Button vccsBtn;
+Button ccvsBtn;
+Button cccsBtn;
 
 enum ComponentType {
     RESISTOR,
@@ -1231,6 +1230,7 @@ public:
             selectedSignalIndex = -1;
         }
     }
+
     void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
         if (voltages.empty() && currents.empty()) return;
 
@@ -1295,7 +1295,7 @@ public:
             for (double t = ceil(minTime/timeStep)*timeStep; t <= maxTime; t += timeStep) {
                 int x = area.x + static_cast<int>((t - minTime) / timeRange * area.w);
                 SDL_RenderDrawLine(renderer, x, area.y, x, area.y + area.h);
-                renderText(to_string(t).substr(0, 6), x + 2, area.y + area.h - 20, currentTheme.text);
+                renderText(to_string(t).substr(0, 3), x + 2, area.y + area.h - 20, currentTheme.text);
             }
 
             double valueStep = pow(10, floor(log10(valueRange)));
@@ -1304,7 +1304,7 @@ public:
             for (double v = ceil(minValue/valueStep)*valueStep; v <= maxValue; v += valueStep) {
                 int y = area.y + area.h - static_cast<int>((v - minValue) / valueRange * area.h);
                 SDL_RenderDrawLine(renderer, area.x, y, area.x + area.w, y);
-                renderText(to_string(v).substr(0, 6), area.x + 2, y - 20, currentTheme.text);
+                renderText(to_string(v).substr(0, 5), area.x + 2, y - 20, currentTheme.text);
             }
         }
 
@@ -1342,7 +1342,6 @@ public:
             }
         }
 
-        // In drawLTspiceStylePlot function, replace the legend code with:
         if (showLegend) {
             int legendX = area.x + 10;
             int legendY = area.y + 10;
@@ -1369,11 +1368,6 @@ public:
             }
         }
 
-
-
-
-            // Add cursor drawing logic
-        // In your drawLTspiceStylePlot function, replace the single cursor drawing code:
         for (const auto& cursor : cursors) {
             if (cursor.active && cursor.x >= area.x && cursor.x <= area.x + area.w &&
                 cursor.y >= area.y && cursor.y <= area.y + area.h) {
@@ -3529,17 +3523,14 @@ void Circuit::save(Archive &archive) const {
 
 template <class Archive>
 void Circuit::load(Archive& archive) {
-    // Clear existing components
     for (auto comp : components) {
         delete comp;
     }
     components.clear();
 
-    // Load component count
     size_t numComponents;
     archive(numComponents);
 
-    // Load each component
     for (size_t i = 0; i < numComponents; i++) {
         string type;
         archive(type);
@@ -3596,7 +3587,6 @@ void Circuit::load(Archive& archive) {
         }
     }
 
-    // Load circuit data
     archive(
         maxNode,
         wireConnections,
@@ -3687,12 +3677,10 @@ void showAnalysisSettings(SDL_Renderer* renderer) {
 
     renderText("Analysis Settings", analysisWindow.x + 20, analysisWindow.y + 20, currentTheme.text);
 
-    renderText("Time Step (s):", analysisWindow.x + 20, analysisWindow.y + 60, currentTheme.text);
-    TextBox stepBox = {analysisWindow.x + 150, analysisWindow.y + 60, 150, 30, to_string(tStep)};
+    renderText("Time Step:", analysisWindow.x + 20, analysisWindow.y + 60, currentTheme.text);
     renderTextBox(stepBox);
 
-    renderText("Stop Time (s):", analysisWindow.x + 20, analysisWindow.y + 110, currentTheme.text);
-    TextBox stopBox = {analysisWindow.x + 150, analysisWindow.y + 110, 150, 30, to_string(tStop)};
+    renderText("Stop Time:", analysisWindow.x + 20, analysisWindow.y + 110, currentTheme.text);
     renderTextBox(stopBox);
 
     Button runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40, "Run", GREEN};
@@ -4485,22 +4473,22 @@ void renderComponentLibrary(SDL_Renderer* renderer) {
 
     renderText("Component Library", libWindow.x + 20, libWindow.y + 10, currentTheme.text);
 
-    passiveBtn = {870, 50, 120, 40, "Passives", currentTheme.button};
-    sourcesBtn = {870, 100, 120, 40, "Sources", currentTheme.button};
-    semiBtn = {870, 150, 120, 40, "Semiconductors", currentTheme.button};
-    depBtn = {870, 200, 120, 40, "Dependent", currentTheme.button};
+    passiveBtn = {870, 100, 120, 40, "Passives", currentTheme.button};
+    sourcesBtn = {870, 150, 120, 40, "Sources", currentTheme.button};
+    semiBtn = {870, 200, 120, 40, "Semis", currentTheme.button};
+    depBtn = {870, 250, 120, 40, "Dependent", currentTheme.button};
 
     resBtn = {1000, 100, 120, 40, "Resistor", currentTheme.button};
     capBtn = {1000, 150, 120, 40, "Capacitor", currentTheme.button};
     indBtn = {1000, 200, 120, 40, "Inductor", currentTheme.button};
-    diodeBtn = {1000, 250, 120, 40, "Diode", currentTheme.button};
+    diodeBtn = {1000, 100, 120, 40, "Diode", currentTheme.button};
     vSrcBtn = {1000, 100, 120, 40, "V Source", currentTheme.button};
     iSrcBtn = {1000, 150, 120, 40, "I Source", currentTheme.button};
     gndBtn = {1000, 200, 120, 40, "Ground", currentTheme.button};
-    vcvsBtn = {1000, 250, 120, 40, "VCVS", currentTheme.button};
-    vccsBtn = {1000, 300, 120, 40, "VCCS", currentTheme.button};
-    ccvsBtn = {1000, 350, 120, 40, "CCVS", currentTheme.button};
-    cccsBtn = {1000, 400, 120, 40, "CCCS", currentTheme.button};
+    vcvsBtn = {1000, 100, 120, 40, "VCVS", currentTheme.button};
+    vccsBtn = {1000, 150, 120, 40, "VCCS", currentTheme.button};
+    ccvsBtn = {1000, 200, 120, 40, "CCVS", currentTheme.button};
+    cccsBtn = {1000, 250, 120, 40, "CCCS", currentTheme.button};
 
     renderButton(passiveBtn);
     renderButton(sourcesBtn);
@@ -4596,8 +4584,6 @@ void handleLoadButton(Circuit*& circuit, string& currentCircuitFile, const strin
         delete newCircuit;
     }
 }
-
-
 
 void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
     if (circuit->selectedSignalIndex == -1) return;
@@ -4702,6 +4688,8 @@ int main(int argc, char* argv[]) {
     double valueZoom = 1.0;
     double timePan = 0.0;
     double valuePan = 0.0;
+    bool Tstep = false;
+    bool Tstop = false;
 
     string currentCircuitFile = "";
     Circuit* circuit = new Circuit();
@@ -4783,8 +4771,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-
-// Check if click is in legend area for signal color selection
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     // Check if click is in legend area
                     if (x >= plotArea.x && x <= plotArea.x + 200 &&
@@ -4813,7 +4799,6 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 }
-
 
                 if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
                     y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
@@ -4965,10 +4950,11 @@ int main(int argc, char* argv[]) {
                         y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
                         try {
                             if (hasDynamic) {
-                                circuit->analyzeTransient(tStep,tStop);
+                                circuit->analyzeTransient(stod(stepBox.text),stod(stopBox.text));
                                 circuit->printTransientResults(Vtimes, voltages, currents, circuit->listNodes().size() - 1);
                             }
                             else {
+                                circuit->analyzeTransient(stod(stepBox.text),stod(stopBox.text));
                                 circuit->analyzeDC();
                             }
                             showVoltage = true;
@@ -4982,6 +4968,20 @@ int main(int argc, char* argv[]) {
                     else if (x >= analysisWindow.x + 200 && x <= analysisWindow.x + 300 &&
                              y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
                         AnalysisSettings = false;
+                    }
+                    else if (x >= 400 && x <= 550 &&
+                             y >= 210 && y <= 240) {
+                        textInputActive = true;
+                        Tstep = true;
+                        activeTextBox = &stepBox;
+                        inputText = stepBox.text;
+                    }
+                    else if (x >= 400 && x <= 550 &&
+                             y >= 260 && y <= 290) {
+                        textInputActive = true;
+                        Tstop = true;
+                        activeTextBox = &stopBox;
+                        inputText = stopBox.text;
                     }
                     continue;
                 }
@@ -5210,6 +5210,12 @@ int main(int argc, char* argv[]) {
             else if (SaveAsDialog) {
                 nameBox.text = inputText;
             }
+            else if (Tstep && AnalysisSettings) {
+                stepBox.text = inputText;
+            }
+            else if (Tstop && AnalysisSettings) {
+                stopBox.text = inputText;
+            }
         }
 
         SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
@@ -5237,6 +5243,10 @@ int main(int argc, char* argv[]) {
 
         renderTextBox(valueBox);
 
+        if (selectedComponent && !FileMenu && !EditMenu && !AnalysisSettings && !FileDialog && !SaveAsDialog) {
+            showComponentProperties(renderer, selectedComponent);
+        }
+
         if (FileMenu) {
             showFileMenu(renderer, fileMenuRect);
         }
@@ -5259,10 +5269,6 @@ int main(int argc, char* argv[]) {
 
         if (SaveAsDialog) {
             showSaveAsDialog(renderer, nameBox.text);
-        }
-
-        if (selectedComponent) {
-            showComponentProperties(renderer, selectedComponent);
         }
 
         if (showShortcutHelp) {
