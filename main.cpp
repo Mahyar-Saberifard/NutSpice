@@ -53,6 +53,27 @@ struct PlotSignal {
     vector<double> values;
     string name;
     SDL_Color color;
+    bool selected = false;
+
+    void changeColor(SDL_Color newColor) {
+        color = newColor;
+    }
+
+    void toggleSelected() {
+        selected = !selected;
+    }
+};
+const vector<SDL_Color> colorPalette = {
+        {255, 0, 0, 255},      // Red
+        {0, 255, 0, 255},      // Green
+        {0, 0, 255, 255},      // Blue
+        {255, 255, 0, 255},    // Yellow
+        {255, 0, 255, 255},    // Magenta
+        {0, 255, 255, 255},    // Cyan
+        {255, 165, 0, 255},    // Orange
+        {128, 0, 128, 255},    // Purple
+        {165, 42, 42, 255},    // Brown
+        {0, 128, 0, 255}       // Dark Green
 };
 struct Cursor {
     int x;
@@ -63,6 +84,8 @@ struct Cursor {
     SDL_Color color;
     bool dragging;
 };
+
+
 
 vector<Cursor> cursors;
 int activeCursorIndex = -1;
@@ -585,6 +608,8 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
 }
 class Circuit {
 public:
+    vector<PlotSignal> plotSignals;
+    int selectedSignalIndex = -1;
     vector<Component*> components;
     int maxNode;
     static double currentTimeStep;
@@ -895,6 +920,9 @@ public:
     }
 
     void analyzeDC() {
+        plotSignals.clear(); // Clear previous signals
+        selectedSignalIndex = -1;
+
         if (!hasGround()) {
             throw runtime_error("Error: No ground node detected in the circuit");
         }
@@ -967,22 +995,56 @@ public:
             cout << "-------------------\n";
             cout << "Node Voltages:\n";
             cout << "  Node GND: 0.000000 V\n";
+
+            // Create DC plot signals (single point for each node)
+            vector<double> dcTime = {0.0}; // Single time point for DC
             for (int i = 0; i < numNodes; i++) {
                 cout << "  Node " << getNodeName(i+1) << ": " << fixed << setprecision(6) << x[i] << " V\n";
+
+                // Create a DC signal for this node
+                vector<double> dcVoltage = {x[i]};
+                SDL_Color color = colorPalette[i % colorPalette.size()];
+                addPlotSignal("DC V(" + getNodeName(i+1) + ")", dcTime, dcVoltage, color);
             }
 
             if (numVSources > 0) {
                 cout << "\nCurrents through Voltage Sources:\n";
                 for (int i = 0; i < numVSources; i++) {
                     cout << "  Source " << (i+1) << ": " << fixed << setprecision(6) << x[numNodes + i] << " A\n";
+
+                    // Create DC signal for voltage source current
+                    vector<double> dcCurrent = {x[numNodes + i]};
+                    SDL_Color color = colorPalette[(numNodes + i) % colorPalette.size()];
+                    addPlotSignal("DC I(VSource" + to_string(i+1) + ")", dcTime, dcCurrent, color);
                 }
             }
 
             cout << "\nCurrents through Resistors:\n";
+            int resistorCount = 0;
             for (auto comp : components) {
                 if (comp->type == RESISTOR) {
                     double current = comp->getCurrent(x);
                     cout << "  " << comp->name << ": " << fixed << setprecision(6) << current << " A\n";
+
+                    // Create DC signal for resistor current
+                    vector<double> dcCurrent = {current};
+                    SDL_Color color = colorPalette[(numNodes + numVSources + resistorCount) % colorPalette.size()];
+                    addPlotSignal("DC I(" + comp->name + ")", dcTime, dcCurrent, color);
+                    resistorCount++;
+                }
+            }
+
+            // Add currents for other components
+            int otherCurrentCount = 0;
+            for (auto comp : components) {
+                if (comp->type == CAPACITOR || comp->type == INDUCTOR || comp->type == DIODE) {
+                    double current = comp->getCurrent(x);
+
+                    // Create DC signal for component current
+                    vector<double> dcCurrent = {current};
+                    SDL_Color color = colorPalette[(numNodes + numVSources + resistorCount + otherCurrentCount) % colorPalette.size()];
+                    addPlotSignal("DC I(" + comp->name + ")", dcTime, dcCurrent, color);
+                    otherCurrentCount++;
                 }
             }
 
@@ -996,6 +1058,8 @@ public:
                 cerr << " | " << b[i] << endl;
             }
         }
+
+        cout << "DC analysis completed. Created " << plotSignals.size() << " plot signals." << endl;
     }
 
     void analyzeTransient(double tStep, double tStop) {
@@ -1006,6 +1070,8 @@ public:
         currents.clear();
         Vtimes.clear();
         Itimes.clear();
+        plotSignals.clear(); // Clear previous signals
+        selectedSignalIndex = -1;
 
         if (!hasGround()) {
             throw runtime_error("Error: No ground node detected in the circuit");
@@ -1026,6 +1092,21 @@ public:
         }
 
         int numVars = numNodes + numVSources + numInductors;
+
+        // Vectors to store results for each node
+        vector<vector<double>> nodeVoltagesOverTime(numNodes);
+        vector<double> timePoints;
+        vector<vector<double>> componentCurrentsOverTime;
+        vector<string> currentSignalNames;
+
+        // Initialize component currents storage
+        for (auto comp : components) {
+            if (comp->type == RESISTOR || comp->type == CAPACITOR ||
+                comp->type == INDUCTOR || comp->type == DIODE) {
+                componentCurrentsOverTime.push_back(vector<double>());
+                currentSignalNames.push_back(comp->name + " Current");
+            }
+        }
 
         while (t <= tStop) {
             vector<vector<double>> G(numNodes, vector<double>(numNodes, 0.0));
@@ -1063,6 +1144,24 @@ public:
 
                 x = solveSystem(A, b);
 
+                // Store results for plotting
+                timePoints.push_back(t);
+                for (int i = 0; i < numNodes; i++) {
+                    nodeVoltagesOverTime[i].push_back(x[i]);
+                }
+
+                // Store component currents
+                int currentIndex = 0;
+                for (auto comp : components) {
+                    if (comp->type == RESISTOR || comp->type == CAPACITOR ||
+                        comp->type == INDUCTOR || comp->type == DIODE) {
+                        double current = comp->getCurrent(x);
+                        componentCurrentsOverTime[currentIndex].push_back(current);
+                        currentIndex++;
+                    }
+                }
+
+                // Store for backward compatibility
                 for (int i = 0; i < numNodes; i++) {
                     Vtimes.push_back(t);
                     voltages.push_back(x[i]);
@@ -1073,7 +1172,7 @@ public:
                         comp->type == INDUCTOR || comp->type == DIODE) {
                         Itimes.push_back(t);
                         currents.push_back(comp->getCurrent(x));
-                        }
+                    }
                 }
 
             } catch (const runtime_error& e) {
@@ -1087,8 +1186,51 @@ public:
 
             t += tStep;
         }
+
+        // Create plot signals for each node voltage
+        for (int i = 0; i < numNodes; i++) {
+            string nodeName = getNodeName(i + 1);
+            SDL_Color color = colorPalette[i % colorPalette.size()];
+            addPlotSignal("V(" + nodeName + ")", timePoints, nodeVoltagesOverTime[i], color);
+        }
+
+        // Create plot signals for component currents
+        for (size_t i = 0; i < componentCurrentsOverTime.size(); i++) {
+            SDL_Color color = colorPalette[(numNodes + i) % colorPalette.size()];
+            addPlotSignal("I(" + currentSignalNames[i] + ")", timePoints, componentCurrentsOverTime[i], color);
+        }
+
+        cout << "Transient analysis completed. Created " << plotSignals.size() << " plot signals." << endl;
     }
 
+    void addPlotSignal(const string& name, const vector<double>& times,
+                       const vector<double>& values, SDL_Color color = {255, 0, 0, 255}) {
+        PlotSignal signal;
+        signal.name = name;
+        signal.time = times;
+        signal.values = values;
+        signal.color = color;
+        plotSignals.push_back(signal);
+    }
+
+    void changeSignalColor(int index, SDL_Color newColor) {
+        if (index >= 0 && index < plotSignals.size()) {
+            plotSignals[index].changeColor(newColor);
+        }
+    }
+
+    void selectSignal(int index) {
+        if (selectedSignalIndex >= 0 && selectedSignalIndex < plotSignals.size()) {
+            plotSignals[selectedSignalIndex].selected = false;
+        }
+
+        if (index >= 0 && index < plotSignals.size()) {
+            plotSignals[index].selected = true;
+            selectedSignalIndex = index;
+        } else {
+            selectedSignalIndex = -1;
+        }
+    }
     void drawLTspiceStylePlot(SDL_Renderer* renderer, const SDL_Rect& area) {
         if (voltages.empty() && currents.empty()) return;
 
@@ -1200,18 +1342,28 @@ public:
             }
         }
 
+        // In drawLTspiceStylePlot function, replace the legend code with:
         if (showLegend) {
             int legendX = area.x + 10;
             int legendY = area.y + 10;
 
-            for (size_t i = 0; i < components.size(); i++) {
-                const auto& sig = components[i];
+            for (size_t i = 0; i < plotSignals.size(); i++) {
+                const auto& signal = plotSignals[i];
 
+                // Draw color box
                 SDL_Rect colorRect = {legendX, legendY, 15, 15};
-                SDL_SetRenderDrawColor(renderer, 120, 0, 0, 255);
+                SDL_SetRenderDrawColor(renderer, signal.color.r, signal.color.g, signal.color.b, 255);
                 SDL_RenderFillRect(renderer, &colorRect);
 
-                renderText(sig->name, legendX + 20, legendY, BLACK);
+                // Draw selection border if selected
+                if (signal.selected) {
+                    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+                    SDL_RenderDrawRect(renderer, &colorRect);
+                }
+
+                // Draw signal name
+                SDL_Color textColor = signal.selected ? WHITE : currentTheme.text;
+                renderText(signal.name, legendX + 20, legendY, textColor);
 
                 legendY += 20;
             }
@@ -1275,6 +1427,35 @@ public:
 
             renderText(deltaTimeStr, deltaBox.x + 5, deltaBox.y + 5, WHITE);
             renderText(deltaValueStr, deltaBox.x + 5, deltaBox.y + 25, WHITE);
+        }
+
+        for (size_t sigIdx = 0; sigIdx < plotSignals.size(); sigIdx++) {
+            const auto& signal = plotSignals[sigIdx];
+
+            SDL_SetRenderDrawColor(renderer, signal.color.r, signal.color.g, signal.color.b, 255);
+
+            for (size_t i = 1; i < signal.time.size(); i++) {
+                int x1 = area.x + static_cast<int>((signal.time[i-1] - minTime) / timeRange * area.w);
+                int y1 = area.y + area.h - static_cast<int>((signal.values[i-1] - minValue) / valueRange * area.h);
+                int x2 = area.x + static_cast<int>((signal.time[i] - minTime) / timeRange * area.w);
+                int y2 = area.y + area.h - static_cast<int>((signal.values[i] - minValue) / valueRange * area.h);
+
+                SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+            }
+
+            // Draw points
+            for (size_t i = 0; i < signal.time.size(); i++) {
+                int x = area.x + static_cast<int>((signal.time[i] - minTime) / timeRange * area.w);
+                int y = area.y + area.h - static_cast<int>((signal.values[i] - minValue) / valueRange * area.h);
+
+                for (int dx = -2; dx <= 2; dx++) {
+                    for (int dy = -2; dy <= 2; dy++) {
+                        if (dx*dx + dy*dy <= 4) {
+                            SDL_RenderDrawPoint(renderer, x + dx, y + dy);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1457,6 +1638,9 @@ public:
     void saveToFile(const string& filename) const;
 
     bool loadFromFile(const string& filename);
+
+
+
 };
 
 void Circuit::calculateNodePositions(){
@@ -4413,6 +4597,103 @@ void handleLoadButton(Circuit*& circuit, string& currentCircuitFile, const strin
     }
 }
 
+
+
+void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
+    if (circuit->selectedSignalIndex == -1) return;
+
+    SDL_Rect dialog = {x, y, 200, 250};
+    SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
+    SDL_RenderFillRect(renderer, &dialog);
+    SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+    SDL_RenderDrawRect(renderer, &dialog);
+
+    renderText("Select Color", dialog.x + 10, dialog.y + 10, currentTheme.text);
+
+    // Draw color buttons with better layout
+    const int colorsPerRow = 4;
+    const int buttonSize = 35;
+    const int spacing = 10;
+
+    for (size_t i = 0; i < colorPalette.size(); i++) {
+        int row = i / colorsPerRow;
+        int col = i % colorsPerRow;
+        SDL_Rect colorBtn = {
+                dialog.x + spacing + col * (buttonSize + spacing),
+                dialog.y + 40 + row * (buttonSize + spacing),
+                buttonSize,
+                buttonSize
+        };
+
+        SDL_SetRenderDrawColor(renderer, colorPalette[i].r, colorPalette[i].g, colorPalette[i].b, 255);
+        SDL_RenderFillRect(renderer, &colorBtn);
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawRect(renderer, &colorBtn);
+
+        // Highlight if this is the current color
+        if (circuit->plotSignals[circuit->selectedSignalIndex].color.r == colorPalette[i].r &&
+            circuit->plotSignals[circuit->selectedSignalIndex].color.g == colorPalette[i].g &&
+            circuit->plotSignals[circuit->selectedSignalIndex].color.b == colorPalette[i].b) {
+            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+            SDL_Rect highlightRect = {colorBtn.x - 2, colorBtn.y - 2, colorBtn.w + 4, colorBtn.h + 4};
+            SDL_RenderDrawRect(renderer, &highlightRect);
+        }
+    }
+
+    // Add cancel button
+    SDL_Rect cancelBtn = {dialog.x + dialog.w - 80, dialog.y + dialog.h - 40, 70, 30};
+    SDL_SetRenderDrawColor(renderer, RED.r, RED.g, RED.b, 255);
+    SDL_RenderFillRect(renderer, &cancelBtn);
+    renderText("Cancel", cancelBtn.x + 5, cancelBtn.y + 5, WHITE);
+
+    SDL_RenderPresent(renderer);
+
+    // Wait for color selection
+    bool colorSelected = false;
+    SDL_Event event;
+
+    while (!colorSelected && SDL_WaitEvent(&event)) {
+        if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+            int mx = event.button.x;
+            int my = event.button.y;
+
+            // Check color buttons
+            for (size_t i = 0; i < colorPalette.size(); i++) {
+                int row = i / colorsPerRow;
+                int col = i % colorsPerRow;
+                SDL_Rect colorBtn = {
+                        dialog.x + spacing + col * (buttonSize + spacing),
+                        dialog.y + 40 + row * (buttonSize + spacing),
+                        buttonSize,
+                        buttonSize
+                };
+
+                if (mx >= colorBtn.x && mx <= colorBtn.x + colorBtn.w &&
+                    my >= colorBtn.y && my <= colorBtn.y + colorBtn.h) {
+                    circuit->changeSignalColor(circuit->selectedSignalIndex, colorPalette[i]);
+                    colorSelected = true;
+                    break;
+                }
+            }
+
+            // Check cancel button
+            if (mx >= cancelBtn.x && mx <= cancelBtn.x + cancelBtn.w &&
+                my >= cancelBtn.y && my <= cancelBtn.y + cancelBtn.h) {
+                colorSelected = true;
+            }
+
+            // If clicked outside the dialog, close it
+            if (!(mx >= dialog.x && mx <= dialog.x + dialog.w &&
+                  my >= dialog.y && my <= dialog.y + dialog.h)) {
+                colorSelected = true;
+            }
+        }
+        else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+            colorSelected = true;
+        }
+    }
+}
+
 int main(int argc, char* argv[]) {
     cursors.push_back({-1, -1, 0.0, 0.0, false, {204, 153, 0, 128}, false});
     changeToPreviousDirectory();
@@ -4454,6 +4735,7 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_QUIT) {
                 running = false;
             }
+
             else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 int x, y;
                 SDL_GetMouseState(&x, &y);
@@ -4500,6 +4782,38 @@ int main(int argc, char* argv[]) {
                         continue;
                     }
                 }
+
+
+// Check if click is in legend area for signal color selection
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    // Check if click is in legend area
+                    if (x >= plotArea.x && x <= plotArea.x + 200 &&
+                        y >= plotArea.y + 10 && y <= plotArea.y + 10 + circuit->plotSignals.size() * 25) {
+
+                        int legendIndex = (y - plotArea.y - 10) / 25;
+
+                        if (legendIndex >= 0 && legendIndex < circuit->plotSignals.size()) {
+                            cout << "Selected signal index: " << legendIndex << " - "
+                                 << circuit->plotSignals[legendIndex].name << endl;
+
+                            // Deselect all other signals first
+                            for (auto& sig : circuit->plotSignals) {
+                                sig.selected = false;
+                            }
+
+                            // Select the clicked signal
+                            circuit->plotSignals[legendIndex].selected = true;
+                            circuit->selectedSignalIndex = legendIndex;
+
+                            // Show color dialog immediately
+                            showColorDialog(renderer, x, y, circuit);
+
+                            // Force immediate redraw
+                            SDL_RenderPresent(renderer);
+                        }
+                    }
+                }
+
 
                 if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
                     y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
