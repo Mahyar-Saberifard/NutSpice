@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 #include <windows.h>
 #include <direct.h>
 #include <SDL2/SDL2_gfx.h>
@@ -3427,7 +3428,7 @@ bool initSDL() {
         return false;
     }
 
-    window = SDL_CreateWindow("Circuit Simulator", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+    window = SDL_CreateWindow("NutSpice 1.2.0", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                               SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN);
     if (!window) {
         cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << endl;
@@ -3445,6 +3446,9 @@ bool initSDL() {
         cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << endl;
         return false;
     }
+
+    SDL_Surface* icon = IMG_Load("C:\\Users\\Mahyar\\Documents\\GitHub\\403102152-403170406.0\\Icon1.png");
+    SDL_SetWindowIcon(window, icon);
 
     return true;
 }
