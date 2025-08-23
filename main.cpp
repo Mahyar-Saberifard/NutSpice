@@ -55,6 +55,7 @@ struct PlotSignal {
     string name;
     SDL_Color color;
     bool selected = false;
+    bool visible = true;  // Add this line
 
     void changeColor(SDL_Color newColor) {
         color = newColor;
@@ -62,6 +63,10 @@ struct PlotSignal {
 
     void toggleSelected() {
         selected = !selected;
+    }
+
+    void toggleVisibility() {  // Add this method
+        visible = !visible;
     }
 };
 const vector<SDL_Color> colorPalette = {
@@ -1350,8 +1355,20 @@ public:
             for (size_t i = 0; i < plotSignals.size(); i++) {
                 const auto& signal = plotSignals[i];
 
+                // Draw visibility indicator (eye icon or checkmark)
+                SDL_Rect visibilityRect = {legendX, legendY, 15, 15};
+                if (signal.visible) {
+                    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255); // Green for visible
+                    SDL_RenderFillRect(renderer, &visibilityRect);
+                } else {
+                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red for hidden
+                    SDL_RenderFillRect(renderer, &visibilityRect);
+                }
+                SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+                SDL_RenderDrawRect(renderer, &visibilityRect);
+
                 // Draw color box
-                SDL_Rect colorRect = {legendX, legendY, 15, 15};
+                SDL_Rect colorRect = {legendX + 20, legendY, 15, 15};
                 SDL_SetRenderDrawColor(renderer, signal.color.r, signal.color.g, signal.color.b, 255);
                 SDL_RenderFillRect(renderer, &colorRect);
 
@@ -1361,9 +1378,12 @@ public:
                     SDL_RenderDrawRect(renderer, &colorRect);
                 }
 
-                // Draw signal name
+                // Draw signal name (grayed out if hidden)
                 SDL_Color textColor = signal.selected ? WHITE : currentTheme.text;
-                renderText(signal.name, legendX + 20, legendY, textColor);
+                if (!signal.visible) {
+                    textColor = {128, 128, 128, 255}; // Gray out hidden signals
+                }
+                renderText(signal.name, legendX + 40, legendY, textColor);
 
                 legendY += 20;
             }
@@ -1426,6 +1446,8 @@ public:
 
         for (size_t sigIdx = 0; sigIdx < plotSignals.size(); sigIdx++) {
             const auto& signal = plotSignals[sigIdx];
+
+            if (!signal.visible) continue;
 
             SDL_SetRenderDrawColor(renderer, signal.color.r, signal.color.g, signal.color.b, 255);
 
@@ -1620,13 +1642,13 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            components,
-            maxNode,
-            wireConnections,
-            nodePositions,
-            nodeMap,
-            reverseNodeMap,
-            nextNodeNumber
+                components,
+                maxNode,
+                wireConnections,
+                nodePositions,
+                nodeMap,
+                reverseNodeMap,
+                nextNodeNumber
         );
     }
 
@@ -1819,7 +1841,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value
         );
     }
 };
@@ -1924,7 +1946,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value
         );
     }
 };
@@ -2046,7 +2068,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value
         );
     }
 };
@@ -2177,7 +2199,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2
+                type, name, nodeName1, nodeName2, node1, node2
         );
     }
 };
@@ -2226,7 +2248,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2
+                type, name, nodeName1, nodeName2, node1, node2
         );
     }
 };
@@ -2299,7 +2321,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value
         );
     }
 };
@@ -2397,7 +2419,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
+                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
         );
     }
 };
@@ -2505,7 +2527,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, v1, v2, td, tf, tr, pw, per
+                type, name, nodeName1, nodeName2, node1, node2, v1, v2, td, tf, tr, pw, per
         );
     }
 };
@@ -2573,7 +2595,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value
         );
     }
 };
@@ -2666,7 +2688,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
+                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
         );
     }
 };
@@ -2768,7 +2790,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, i1, i2, td, tr, tf, pw, per
+                type, name, nodeName1, nodeName2, node1, node2, i1, i2, td, tr, tf, pw, per
         );
     }
 };
@@ -2882,7 +2904,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
+                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
         );
     }
 };
@@ -2973,7 +2995,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
+                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
         );
     }
 };
@@ -3086,7 +3108,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
+                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
         );
     }
 };
@@ -3176,7 +3198,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-            type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
+                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
         );
     }
 };
@@ -3516,12 +3538,12 @@ void Circuit::save(Archive &archive) const {
 
     // Save circuit data
     archive(
-        maxNode,
-        wireConnections,
-        nodePositions,
-        nodeMap,
-        reverseNodeMap,
-        nextNodeNumber
+            maxNode,
+            wireConnections,
+            nodePositions,
+            nodeMap,
+            reverseNodeMap,
+            nextNodeNumber
     );
 }
 
@@ -3592,12 +3614,12 @@ void Circuit::load(Archive& archive) {
     }
 
     archive(
-        maxNode,
-        wireConnections,
-        nodePositions,
-        nodeMap,
-        reverseNodeMap,
-        nextNodeNumber
+            maxNode,
+            wireConnections,
+            nodePositions,
+            nodeMap,
+            reverseNodeMap,
+            nextNodeNumber
     );
 }
 
@@ -4588,7 +4610,6 @@ void handleLoadButton(Circuit*& circuit, string& currentCircuitFile, const strin
         delete newCircuit;
     }
 }
-
 void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
     if (circuit->selectedSignalIndex == -1) return;
 
@@ -4600,7 +4621,7 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
 
     renderText("Select Color", dialog.x + 10, dialog.y + 10, currentTheme.text);
 
-    // Draw color buttons with better layout
+    // Draw color palette
     const int colorsPerRow = 4;
     const int buttonSize = 35;
     const int spacing = 10;
@@ -4619,15 +4640,6 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
         SDL_RenderFillRect(renderer, &colorBtn);
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawRect(renderer, &colorBtn);
-
-        // Highlight if this is the current color
-        if (circuit->plotSignals[circuit->selectedSignalIndex].color.r == colorPalette[i].r &&
-            circuit->plotSignals[circuit->selectedSignalIndex].color.g == colorPalette[i].g &&
-            circuit->plotSignals[circuit->selectedSignalIndex].color.b == colorPalette[i].b) {
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            SDL_Rect highlightRect = {colorBtn.x - 2, colorBtn.y - 2, colorBtn.w + 4, colorBtn.h + 4};
-            SDL_RenderDrawRect(renderer, &highlightRect);
-        }
     }
 
     // Add cancel button
@@ -4684,6 +4696,35 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
     }
 }
 
+void handleLegendClick(Circuit* circuit, int x, int y, const SDL_Rect& plotArea) {
+    if (x < plotArea.x + 10 || x > plotArea.x + 150) return; // Only handle clicks in legend area
+
+    int legendYStart = plotArea.y + 10;
+    int legendItemHeight = 20;
+
+    // Calculate which legend item was clicked
+    int legendIndex = (y - legendYStart) / legendItemHeight;
+
+    if (legendIndex >= 0 && legendIndex < circuit->plotSignals.size()) {
+        // Check if click was on visibility indicator (first 15px)
+        if (x >= plotArea.x + 10 && x <= plotArea.x + 25) {
+            // Toggle visibility
+            circuit->plotSignals[legendIndex].toggleVisibility();
+        }
+            // Check if click was on color box (next 15px)
+        else if (x >= plotArea.x + 30 && x <= plotArea.x + 45) {
+            // Select signal and show color dialog
+            for (auto& sig : circuit->plotSignals) {
+                sig.selected = false;
+            }
+            circuit->plotSignals[legendIndex].selected = true;
+            circuit->selectedSignalIndex = legendIndex;
+
+            // Show color selection dialog (you'll need to implement this)
+            showColorDialog(renderer, x, y, circuit);
+        }
+    }
+}
 int main(int argc, char* argv[]) {
     cursors.push_back({-1, -1, 0.0, 0.0, false, {204, 153, 0, 128}, false});
     changeToPreviousDirectory();
@@ -4775,34 +4816,19 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                if (event.button.button == SDL_BUTTON_LEFT) {
-                    // Check if click is in legend area
-                    if (x >= plotArea.x && x <= plotArea.x + 200 &&
-                        y >= plotArea.y + 10 && y <= plotArea.y + 10 + circuit->plotSignals.size() * 25) {
 
-                        int legendIndex = (y - plotArea.y - 10) / 25;
+                if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+                    int x = event.button.x;
+                    int y = event.button.y;
 
-                        if (legendIndex >= 0 && legendIndex < circuit->plotSignals.size()) {
-                            cout << "Selected signal index: " << legendIndex << " - "
-                                 << circuit->plotSignals[legendIndex].name << endl;
+                    // Check if click is in the plot area (legend)
+                    if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
+                        y >= plotArea.y && y <= plotArea.y + plotArea.h) {
 
-                            // Deselect all other signals first
-                            for (auto& sig : circuit->plotSignals) {
-                                sig.selected = false;
-                            }
-
-                            // Select the clicked signal
-                            circuit->plotSignals[legendIndex].selected = true;
-                            circuit->selectedSignalIndex = legendIndex;
-
-                            // Show color dialog immediately
-                            showColorDialog(renderer, x, y, circuit);
-
-                            // Force immediate redraw
-                            SDL_RenderPresent(renderer);
-                        }
+                        handleLegendClick(circuit, x, y, plotArea);
                     }
                 }
+
 
                 if (x >= circuitArea.x && x <= circuitArea.x + circuitArea.w &&
                     y >= circuitArea.y && y <= circuitArea.y + circuitArea.h) {
@@ -5008,7 +5034,7 @@ int main(int argc, char* argv[]) {
                             FileDialog = false;
                             fileClicked = true;
                             break;
-                            }
+                        }
                     }
 
                     // If no file was clicked, check for button clicks
@@ -5018,12 +5044,12 @@ int main(int argc, char* argv[]) {
                             // Open button clicked - but we already handled file clicks above
                             // This would be for a default file or other logic
                             FileDialog = false;
-                            }
+                        }
                         else if (x >= dialog.x + 220 && x <= dialog.x + 320 &&
                                  y >= dialog.y + 330 && y <= dialog.y + 370) {
                             // Cancel button clicked
                             FileDialog = false;
-                                 }
+                        }
                     }
                     continue;
                 }
@@ -5049,7 +5075,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 if (x >= valueBox.rect.x && x <= valueBox.rect.x + valueBox.rect.w &&
-                         y >= valueBox.rect.y && y <= valueBox.rect.y + valueBox.rect.h) {
+                    y >= valueBox.rect.y && y <= valueBox.rect.y + valueBox.rect.h) {
                     textInputActive = true;
                     activeTextBox = &valueBox;
                     inputText = valueBox.text;
