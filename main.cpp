@@ -5031,6 +5031,10 @@ void renderShortcutHelp(SDL_Renderer* renderer) {
     renderText("L - Place Inductor", 20, y, currentTheme.text); y += 25;
     renderText("V - Place Voltage Source", 20, y, currentTheme.text); y += 25;
     renderText("I - Place Current Source", 20, y, currentTheme.text); y += 25;
+    renderText("S - Place Pulse Source", 20, y, currentTheme.text); y += 25;
+    renderText("Shift+S - Place Sin Source", 20, y, currentTheme.text); y += 25;
+    renderText("P - Place Pulse Current Source", 20, y, currentTheme.text); y += 25;
+    renderText("Shift+P - Place Sin Current Source", 20, y, currentTheme.text); y += 25;
     renderText("Shift+D - Place Diode", 20, y, currentTheme.text); y += 25;
     renderText("Shift+G - Place Ground", 20, y, currentTheme.text); y += 25;
     renderText("W - Place Wire", 20, y, currentTheme.text); y += 25;
