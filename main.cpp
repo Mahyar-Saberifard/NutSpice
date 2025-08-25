@@ -55,7 +55,7 @@ struct PlotSignal {
     string name;
     SDL_Color color;
     bool selected = false;
-    bool visible = true;  // Add this line
+    bool visible = true;
 
     void changeColor(SDL_Color newColor) {
         color = newColor;
@@ -65,7 +65,7 @@ struct PlotSignal {
         selected = !selected;
     }
 
-    void toggleVisibility() {  // Add this method
+    void toggleVisibility() {
         visible = !visible;
     }
 };
@@ -280,12 +280,22 @@ enum PlacementMode {
     PLACE_PULSE_CURRENT_SOURCE
 };
 
+struct CircuitHeader {
+    char magic[8] = {'N', 'U', 'T', 'S', 'P', 'I', 'C', 'E'};
+    uint32_t version = 1;
+    uint32_t checksum = 0;
+
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(magic, version, checksum);
+    }
+};
+
 PlacementMode currentPlacementMode = PLACE_NONE;
 
 vector<string> listCircuitFiles(const string& directory) {
     vector<string> files;
 
-    // Get .txt files
 #ifdef _WIN32
     WIN32_FIND_DATA findData;
     HANDLE hFind = FindFirstFile((directory + "\\*.txt").c_str(), &findData);
@@ -311,7 +321,6 @@ vector<string> listCircuitFiles(const string& directory) {
     }
 #endif
 
-    // Get .cir files
 #ifdef _WIN32
     hFind = FindFirstFile((directory + "\\*.cir").c_str(), &findData);
     if (hFind != INVALID_HANDLE_VALUE) {
@@ -531,7 +540,6 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
             if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
                 y >= plotArea.y && y <= plotArea.y + plotArea.h) {
 
-                // Find if clicking near existing cursor
                 activeCursorIndex = -1;
                 for (size_t i = 0; i < cursors.size(); i++) {
                     if (abs(x - cursors[i].x) < 10 && abs(y - cursors[i].y) < 10) {
@@ -540,34 +548,29 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
                         break;
                     }
                 }
-
-                // If not near existing cursor, create new one with right click
             }
         }
         else if (event.button.button == SDL_BUTTON_RIGHT) {
             if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
                 y >= plotArea.y && y <= plotArea.y + plotArea.h) {
 
-                // Create new cursor on right click
                 Cursor newCursor;
                 newCursor.x = x;
                 newCursor.y = y;
                 newCursor.dragging = true;
                 newCursor.active = true;
 
-                // Calculate cursor values
                 double timeRange = maxTime - minTime;
                 double valueRange = maxValue - minValue;
                 newCursor.time = minTime + (newCursor.x - plotArea.x) * timeRange / plotArea.w;
                 newCursor.value = maxValue - (newCursor.y - plotArea.y) * valueRange / plotArea.h;
 
-                // Assign different colors to cursors
                 static const vector<SDL_Color> cursorColors = {
-                        {204, 153, 0, 128},    // Yellow
-                        {0, 153, 204, 128},    // Blue
-                        {204, 0, 153, 128},    // Magenta
-                        {0, 204, 153, 128},    // Teal
-                        {153, 0, 204, 128}     // Purple
+                        {204, 153, 0, 128},
+                        {0, 153, 204, 128},
+                        {204, 0, 153, 128},
+                        {0, 204, 153, 128},
+                        {153, 0, 204, 128}
                 };
                 newCursor.color = cursorColors[cursors.size() % cursorColors.size()];
 
@@ -589,13 +592,11 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
             cursors[activeCursorIndex].x = x;
             cursors[activeCursorIndex].y = y;
 
-            // Constrain cursor to plot area
             if (cursors[activeCursorIndex].x < plotArea.x) cursors[activeCursorIndex].x = plotArea.x;
             if (cursors[activeCursorIndex].x > plotArea.x + plotArea.w) cursors[activeCursorIndex].x = plotArea.x + plotArea.w;
             if (cursors[activeCursorIndex].y < plotArea.y) cursors[activeCursorIndex].y = plotArea.y;
             if (cursors[activeCursorIndex].y > plotArea.y + plotArea.h) cursors[activeCursorIndex].y = plotArea.y + plotArea.h;
 
-            // Calculate cursor values
             double timeRange = maxTime - minTime;
             double valueRange = maxValue - minValue;
             cursors[activeCursorIndex].time = minTime + (cursors[activeCursorIndex].x - plotArea.x) * timeRange / plotArea.w;
@@ -604,7 +605,6 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
     }
     else if (event.type == SDL_KEYDOWN) {
         if (event.key.keysym.sym == SDLK_k) {
-            // Toggle all cursors
             bool anyActive = false;
             for (auto& cursor : cursors) {
                 if (cursor.active) anyActive = true;
@@ -614,7 +614,6 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
             }
         }
         else if (event.key.keysym.sym == SDLK_ESCAPE) {
-            // Clear all cursors
             for (auto& cursor : cursors) {
                 cursor.active = false;
                 cursor.dragging = false;
@@ -622,7 +621,6 @@ void handleCursorInteraction(SDL_Event& event, const SDL_Rect& plotArea,
             activeCursorIndex = -1;
         }
         else if (event.key.keysym.sym == SDLK_DELETE && activeCursorIndex != -1) {
-            // Delete active cursor
             if (cursors.size() > 1) {
                 cursors.erase(cursors.begin() + activeCursorIndex);
                 activeCursorIndex = -1;
@@ -1027,17 +1025,14 @@ public:
             cout << "Node Voltages:\n";
             cout << "  Node GND: 0.000000 V\n";
 
-            // Create time range for DC analysis (0 to 1 second for proper plotting)
             vector<double> dcTime;
             for (double t = 0.0; t <= 1.0; t += 0.1) {
                 dcTime.push_back(t);
             }
 
-            // Create plot signals for each node voltage
             for (int i = 0; i < numNodes; i++) {
                 cout << "  Node " << getNodeName(i+1) << ": " << fixed << setprecision(6) << x[i] << " V\n";
 
-                // Create a constant voltage signal across the time range
                 vector<double> dcVoltage(dcTime.size(), x[i]);
                 SDL_Color color = colorPalette[i % colorPalette.size()];
                 addPlotSignal("DC V(" + getNodeName(i+1) + ")", dcTime, dcVoltage, color);
@@ -1048,7 +1043,6 @@ public:
                 for (int i = 0; i < numVSources; i++) {
                     cout << "  Source " << (i+1) << ": " << fixed << setprecision(6) << x[numNodes + i] << " A\n";
 
-                    // Create constant current signal
                     vector<double> dcCurrent(dcTime.size(), x[numNodes + i]);
                     SDL_Color color = colorPalette[(numNodes + i) % colorPalette.size()];
                     addPlotSignal("DC I(VSource" + to_string(i+1) + ")", dcTime, dcCurrent, color);
@@ -1062,7 +1056,6 @@ public:
                     double current = comp->getCurrent(x);
                     cout << "  " << comp->name << ": " << fixed << setprecision(6) << current << " A\n";
 
-                    // Create constant current signal
                     vector<double> dcCurrent(dcTime.size(), current);
                     SDL_Color color = colorPalette[(numNodes + numVSources + resistorCount) % colorPalette.size()];
                     addPlotSignal("DC I(" + comp->name + ")", dcTime, dcCurrent, color);
@@ -1070,7 +1063,6 @@ public:
                 }
             }
 
-            // Set circuit mode to DC
             currentMode = DC;
 
         } catch (const runtime_error& e) {
@@ -1095,7 +1087,7 @@ public:
         currents.clear();
         Vtimes.clear();
         Itimes.clear();
-        plotSignals.clear(); // Clear previous signals
+        plotSignals.clear();
         selectedSignalIndex = -1;
 
         if (!hasGround()) {
@@ -1118,13 +1110,11 @@ public:
 
         int numVars = numNodes + numVSources + numInductors;
 
-        // Vectors to store results for each node
         vector<vector<double>> nodeVoltagesOverTime(numNodes);
         vector<double> timePoints;
         vector<vector<double>> componentCurrentsOverTime;
         vector<string> currentSignalNames;
 
-        // Initialize component currents storage
         for (auto comp : components) {
             if (comp->type == RESISTOR || comp->type == CAPACITOR ||
                 comp->type == INDUCTOR || comp->type == DIODE) {
@@ -1169,13 +1159,11 @@ public:
 
                 x = solveSystem(A, b);
 
-                // Store results for plotting
                 timePoints.push_back(t);
                 for (int i = 0; i < numNodes; i++) {
                     nodeVoltagesOverTime[i].push_back(x[i]);
                 }
 
-                // Store component currents
                 int currentIndex = 0;
                 for (auto comp : components) {
                     if (comp->type == RESISTOR || comp->type == CAPACITOR ||
@@ -1186,7 +1174,6 @@ public:
                     }
                 }
 
-                // Store for backward compatibility
                 for (int i = 0; i < numNodes; i++) {
                     Vtimes.push_back(t);
                     voltages.push_back(x[i]);
@@ -1212,14 +1199,12 @@ public:
             t += tStep;
         }
 
-        // Create plot signals for each node voltage
         for (int i = 0; i < numNodes; i++) {
             string nodeName = getNodeName(i + 1);
             SDL_Color color = colorPalette[i % colorPalette.size()];
             addPlotSignal("V(" + nodeName + ")", timePoints, nodeVoltagesOverTime[i], color);
         }
 
-        // Create plot signals for component currents
         for (size_t i = 0; i < componentCurrentsOverTime.size(); i++) {
             SDL_Color color = colorPalette[(numNodes + i) % colorPalette.size()];
             addPlotSignal("I(" + currentSignalNames[i] + ")", timePoints, componentCurrentsOverTime[i], color);
@@ -1345,33 +1330,29 @@ public:
             for (size_t i = 0; i < plotSignals.size(); i++) {
                 const auto& signal = plotSignals[i];
 
-                // Draw visibility indicator (eye icon or checkmark)
                 SDL_Rect visibilityRect = {legendX, legendY, 15, 15};
                 if (signal.visible) {
-                    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255); // Green for visible
+                    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
                     SDL_RenderFillRect(renderer, &visibilityRect);
                 } else {
-                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255); // Red for hidden
+                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
                     SDL_RenderFillRect(renderer, &visibilityRect);
                 }
                 SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
                 SDL_RenderDrawRect(renderer, &visibilityRect);
 
-                // Draw color box
                 SDL_Rect colorRect = {legendX + 20, legendY, 15, 15};
                 SDL_SetRenderDrawColor(renderer, signal.color.r, signal.color.g, signal.color.b, 255);
                 SDL_RenderFillRect(renderer, &colorRect);
 
-                // Draw selection border if selected
                 if (signal.selected) {
                     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
                     SDL_RenderDrawRect(renderer, &colorRect);
                 }
 
-                // Draw signal name (grayed out if hidden)
                 SDL_Color textColor = signal.selected ? WHITE : currentTheme.text;
                 if (!signal.visible) {
-                    textColor = {128, 128, 128, 255}; // Gray out hidden signals
+                    textColor = {128, 128, 128, 255};
                 }
                 renderText(signal.name, legendX + 40, legendY, textColor);
 
@@ -1383,7 +1364,6 @@ public:
             minTime = 0;
             maxTime = 1;
 
-            // Keep the original value range calculation
             if (minValue == numeric_limits<double>::max()) minValue = 0;
             if (maxValue == numeric_limits<double>::lowest()) maxValue = 1;
         }
@@ -1392,14 +1372,11 @@ public:
             if (cursor.active && cursor.x >= area.x && cursor.x <= area.x + area.w &&
                 cursor.y >= area.y && cursor.y <= area.y + area.h) {
 
-                // Draw vertical cursor line
                 SDL_SetRenderDrawColor(renderer, cursor.color.r, cursor.color.g, cursor.color.b, cursor.color.a);
                 SDL_RenderDrawLine(renderer, cursor.x, area.y, cursor.x, area.y + area.h);
 
-                // Draw horizontal cursor line
                 SDL_RenderDrawLine(renderer, area.x, cursor.y, area.x + area.w, cursor.y);
 
-                // Draw cursor information box
                 SDL_Rect infoBox = {cursor.x + 10, cursor.y - 80, 180, 70};
                 SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
                 SDL_RenderFillRect(renderer, &infoBox);
@@ -1412,16 +1389,11 @@ public:
                 renderText(timeStr, infoBox.x + 5, infoBox.y + 5, WHITE);
                 renderText(valueStr, infoBox.x + 5, infoBox.y + 25, WHITE);
 
-                // Draw cursor position indicators on axes
                 SDL_SetRenderDrawColor(renderer, cursor.color.r, cursor.color.g, cursor.color.b, 255);
 
-                // Time axis indicator
                 SDL_Rect timeIndicator = {cursor.x, area.y + area.h - 5, 1, 10};
                 SDL_RenderFillRect(renderer, &timeIndicator);
 
-                // Add this after drawing all cursors to show differences
-
-                // Value axis indicator
                 SDL_Rect valueIndicator = {area.x - 10, cursor.y, 10, 1};
                 SDL_RenderFillRect(renderer, &valueIndicator);
             }
@@ -1653,8 +1625,7 @@ public:
 
     bool loadFromFile(const string& filename);
 
-
-
+    void updateAnalysisMode();
 };
 
 void Circuit::calculateNodePositions(){
@@ -1837,7 +1808,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -1942,7 +1913,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2064,7 +2035,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2195,7 +2166,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, posX, posY
         );
     }
 };
@@ -2244,7 +2215,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, posX, posY
         );
     }
 };
@@ -2317,7 +2288,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2382,7 +2353,6 @@ public:
             float x = p1.x + t * (p2.x - p1.x);
             float y = p1.y + t * (p2.y - p1.y);
 
-            // Create sine wave pattern
             float offset = amplitude * sin(t * M_PI * 2);
             points[i].x = x + px * offset;
             points[i].y = y + py * offset;
@@ -2416,7 +2386,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset, posX, posY
         );
     }
 };
@@ -2491,7 +2461,6 @@ public:
             float x = p1.x + t * (p2.x - p1.x);
             float y = p1.y + t * (p2.y - p1.y);
 
-            // Create pulse pattern (low-high-low)
             float offset = (i > 1 && i < 4) ? amplitude : -amplitude;
             points[i].x = x + px * offset;
             points[i].y = y + py * offset;
@@ -2525,7 +2494,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, v1, v2, td, tf, tr, pw, per, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, v1, v2, td, tf, tr, pw, per, posX, posY
         );
     }
 };
@@ -2593,7 +2562,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2653,7 +2622,6 @@ public:
             float x = p1.x + t * (p2.x - p1.x);
             float y = p1.y + t * (p2.y - p1.y);
 
-            // Create sine wave pattern
             float offset = amplitude * sin(t * M_PI * 2);
             points[i].x = x + px * offset;
             points[i].y = y + py * offset;
@@ -2687,7 +2655,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset, posX, posY
         );
     }
 };
@@ -2756,7 +2724,6 @@ public:
             float x = p1.x + t * (p2.x - p1.x);
             float y = p1.y + t * (p2.y - p1.y);
 
-            // Create pulse pattern (low-high-low)
             float offset = (i > 1 && i < 4) ? amplitude : -amplitude;
             points[i].x = x + px * offset;
             points[i].y = y + py * offset;
@@ -2790,7 +2757,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, i1, i2, td, tr, tf, pw, per, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, i1, i2, td, tr, tf, pw, per, posX, posY
         );
     }
 };
@@ -2827,12 +2794,10 @@ public:
         SDL_Point cp1 = nodePositions.at(ctrlNode1);
         SDL_Point cp2 = nodePositions.at(ctrlNode2);
 
-        // Draw the main component (diamond shape for dependent source)
         const int size = 15;
         int centerX = (p1.x + p2.x) / 2;
         int centerY = (p1.y + p2.y) / 2;
 
-        // Draw diamond
         SDL_Point diamond[5] = {
                 {centerX, centerY - size},
                 {centerX + size, centerY},
@@ -2844,15 +2809,12 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, diamond, 5);
 
-        // Draw leads
         SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX, centerY - size);
         SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX, centerY + size);
 
-        // Draw control path (dashed line)
         int midCtrlX = (cp1.x + cp2.x) / 2;
         int midCtrlY = (cp1.y + cp2.y) / 2;
 
-        // Draw dashed line from control nodes to component
         const int dashLength = 5;
         float dx = centerX - midCtrlX;
         float dy = centerY - midCtrlY;
@@ -2873,14 +2835,12 @@ public:
                                static_cast<int>(endX), static_cast<int>(endY));
         }
 
-        // Draw plus and minus signs at control nodes
         SDL_RenderDrawLine(renderer, cp1.x - 5, cp1.y, cp1.x + 5, cp1.y);
         SDL_RenderDrawLine(renderer, cp1.x, cp1.y - 5, cp1.x, cp1.y + 5);
 
         SDL_RenderDrawLine(renderer, cp2.x - 5, cp2.y, cp2.x + 5, cp2.y);
 
-        // Draw gain value
-        //renderText(name + " (G=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
+        renderText(name + " (G=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -2904,7 +2864,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2, posX, posY
         );
     }
 };
@@ -2943,12 +2903,10 @@ public:
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        // Draw the main component (diamond shape for dependent source)
         const int size = 15;
         int centerX = (p1.x + p2.x) / 2;
         int centerY = (p1.y + p2.y) / 2;
 
-        // Draw diamond
         SDL_Point diamond[5] = {
                 {centerX, centerY - size},
                 {centerX + size, centerY},
@@ -2960,20 +2918,16 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, diamond, 5);
 
-        // Draw leads
         SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX, centerY - size);
         SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX, centerY + size);
 
-        // Draw arrow pointing to controlling element
-        // Find controlling component (simplified - in real implementation you'd need to look it up)
         SDL_Point controlPoint = {centerX + size*2, centerY};
         SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
         SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
         SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y + 5);
 
-        // Draw gain value
-//        renderText(name + " (R=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
-//        renderText("Controls: " + controllingVoltageSourceName, centerX - 50, centerY + size + 15, currentTheme.text);
+        renderText(name + " (R=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
+        renderText("Controls: " + controllingVoltageSourceName, centerX - 50, centerY + size + 15, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -2995,7 +2949,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex, posX, posY
         );
     }
 };
@@ -3026,12 +2980,10 @@ public:
         SDL_Point cp1 = nodePositions.at(ctrlNode1);
         SDL_Point cp2 = nodePositions.at(ctrlNode2);
 
-        // Draw the main component (diamond shape with arrow for current source)
         const int size = 15;
         int centerX = (p1.x + p2.x) / 2;
         int centerY = (p1.y + p2.y) / 2;
 
-        // Draw diamond
         SDL_Point diamond[5] = {
                 {centerX, centerY - size},
                 {centerX + size, centerY},
@@ -3043,20 +2995,16 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, diamond, 5);
 
-        // Draw arrow inside diamond indicating current direction
         SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
         SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
         SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
 
-        // Draw leads
         SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - size, centerY);
         SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX + size, centerY);
 
-        // Draw control path (dashed line)
         int midCtrlX = (cp1.x + cp2.x) / 2;
         int midCtrlY = (cp1.y + cp2.y) / 2;
 
-        // Draw dashed line from control nodes to component
         const int dashLength = 5;
         float dx = centerX - midCtrlX;
         float dy = centerY - midCtrlY;
@@ -3077,14 +3025,12 @@ public:
                                static_cast<int>(endX), static_cast<int>(endY));
         }
 
-        // Draw plus and minus signs at control nodes
         SDL_RenderDrawLine(renderer, cp1.x - 5, cp1.y, cp1.x + 5, cp1.y);
         SDL_RenderDrawLine(renderer, cp1.x, cp1.y - 5, cp1.x, cp1.y + 5);
 
         SDL_RenderDrawLine(renderer, cp2.x - 5, cp2.y, cp2.x + 5, cp2.y);
 
-        // Draw transconductance value
-        //  renderText(name + " (gm=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
+        renderText(name + " (gm=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -3108,7 +3054,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2, posX, posY
         );
     }
 };
@@ -3141,12 +3087,10 @@ public:
         SDL_Point p1 = nodePositions.at(node1);
         SDL_Point p2 = nodePositions.at(node2);
 
-        // Draw the main component (diamond shape with arrow for current source)
         const int size = 15;
         int centerX = (p1.x + p2.x) / 2;
         int centerY = (p1.y + p2.y) / 2;
 
-        // Draw diamond
         SDL_Point diamond[5] = {
                 {centerX, centerY - size},
                 {centerX + size, centerY},
@@ -3158,25 +3102,20 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLines(renderer, diamond, 5);
 
-        // Draw arrow inside diamond indicating current direction
         SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
         SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
         SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
 
-        // Draw leads
         SDL_RenderDrawLine(renderer, p1.x, p1.y, centerX - size, centerY);
         SDL_RenderDrawLine(renderer, p2.x, p2.y, centerX + size, centerY);
 
-        // Draw arrow pointing to controlling element
-        // Find controlling component (simplified - in real implementation you'd need to look it up)
         SDL_Point controlPoint = {centerX + size*2, centerY};
         SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
         SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
         SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y + 5);
 
-        // Draw gain value
-//        renderText(name + " (F=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
-//        renderText("Controls: " + controllingVoltageSourceName, centerX - 50, centerY + size + 15, currentTheme.text);
+        renderText(name + " (F=" + to_string(value).substr(0,4) + ")", centerX + size + 5, centerY - 10, currentTheme.text);
+        renderText("Controls: " + controllingVoltageSourceName, centerX - 50, centerY + size + 15, currentTheme.text);
     }
 
     SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
@@ -3198,7 +3137,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex, posX, posY
         );
     }
 };
@@ -3237,7 +3176,6 @@ public:
         SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
         SDL_RenderDrawLine(renderer, p1.x, p1.y, p2.x, p2.y);
 
-        // Optional: draw wire indicator
         int midX = (p1.x + p2.x) / 2;
         int midY = (p1.y + p2.y) / 2;
         SDL_Rect wireIndicator = {midX - 2, midY - 2, 4, 4};
@@ -3262,7 +3200,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, 1e-6, posX, posY
+            cereal::base_class<Component>(this), type, name, nodeName1, nodeName2, node1, node2, 1e-6, posX, posY
         );
     }
 };
@@ -3272,7 +3210,6 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
     transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
 
     if (extension == "cir") {
-        // Load binary circuit file
         if (!circuit.loadFromFile(filename)) {
             cerr << "Error: Could not load circuit file '" << filename << "'" << endl;
             char cwd[MAX_PATH];
@@ -3282,7 +3219,6 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
         } else {
             cout << "Successfully loaded circuit from: " << filename << endl;
 
-            // Update the global node information from the loaded circuit
             nodeMap = circuit.nodeMap;
             reverseNodeMap = circuit.reverseNodeMap;
             nextNodeNumber = circuit.nextNodeNumber;
@@ -3291,7 +3227,6 @@ void processCircuitFile(const string& filename, Circuit& circuit) {
         return;
     }
 
-    // Original .txt processing code for SPICE files
     ifstream file(filename);
     if (!file.is_open()) {
         string withExtension = filename;
@@ -3564,20 +3499,34 @@ string ensureExtension(const string& filename) {
     return filename;
 }
 
-template<class Archive>
-void Circuit::save(Archive &archive) const {
-    // Save circuit mode first
+void Circuit::updateAnalysisMode() {
+    currentMode = DC;
+
+    for (const auto& comp : components) {
+        if (comp->type == CAPACITOR || comp->type == INDUCTOR ||
+            comp->type == SIN_VOLTAGE_SOURCE || comp->type == SIN_CURRENT_SOURCE ||
+            comp->type == PULSE_VOLTAGE_SOURCE || comp->type == PULSE_CURRENT_SOURCE) {
+            currentMode = TRANSIENT;
+            break;
+            }
+    }
+
+    cout << "Analysis mode set to: " << (currentMode == DC ? "DC" : "Transient") << endl;
+}
+
+template <class Archive>
+void Circuit::save(Archive& archive) const {
+    CircuitHeader header;
+    archive(header);
+
     archive(static_cast<int>(currentMode));
 
-    // Save component count
-    archive(components.size());
+    size_t numComponents = components.size();
+    archive(numComponents);
 
-    // Save each component with type information and position
     for (const auto& comp : components) {
-        archive(comp->getType());
-
-        auto pos = comp->getPosition();
-        archive(pos.first, pos.second);
+        string typeName = comp->getType();
+        archive(typeName);
 
         if (auto resistor = dynamic_cast<Resistor*>(comp)) {
             archive(*resistor);
@@ -3594,8 +3543,11 @@ void Circuit::save(Archive &archive) const {
         else if (auto currentSource = dynamic_cast<CurrentSource*>(comp)) {
             archive(*currentSource);
         }
-        else if (auto gnd = dynamic_cast<Ground*>(comp)) {
-            archive(*gnd);
+        else if (auto diode = dynamic_cast<Diode*>(comp)) {
+            archive(*diode);
+        }
+        else if (auto ground = dynamic_cast<Ground*>(comp)) {
+            archive(*ground);
         }
         else if (auto sinVS = dynamic_cast<SinVoltageSource*>(comp)) {
             archive(*sinVS);
@@ -3609,124 +3561,155 @@ void Circuit::save(Archive &archive) const {
         else if (auto pulseIS = dynamic_cast<PulseCurrentSource*>(comp)) {
             archive(*pulseIS);
         }
-        else if (auto vccs = dynamic_cast<VCCS*>(comp)) {
-            archive(*vccs);
-        }
-        else if (auto cccs = dynamic_cast<CCCS*>(comp)) {
-            archive(*cccs);
-        }
         else if (auto vcvs = dynamic_cast<VCVS*>(comp)) {
             archive(*vcvs);
+        }
+        else if (auto vccs = dynamic_cast<VCCS*>(comp)) {
+            archive(*vccs);
         }
         else if (auto ccvs = dynamic_cast<CCVS*>(comp)) {
             archive(*ccvs);
         }
-
+        else if (auto cccs = dynamic_cast<CCCS*>(comp)) {
+            archive(*cccs);
+        }
+        else if (auto wire = dynamic_cast<Wire*>(comp)) {
+            archive(*wire);
+        }
     }
 
-    // Save circuit data
-    archive(
-            maxNode,
-            wireConnections,
-            nodePositions,
-            nodeMap,
-            reverseNodeMap,
-            nextNodeNumber
-    );
+    archive(wireConnections);
+
+    archive(maxNode, nodePositions, nodeMap, reverseNodeMap, nextNodeNumber);
 }
 
 template <class Archive>
 void Circuit::load(Archive& archive) {
-    int modeInt;
-    archive(modeInt);
-    currentMode = static_cast<CircuitMode>(modeInt);
+    CircuitHeader header;
+    archive(header);
+
+    if (strncmp(header.magic, "NUTSPICE", 8) != 0) {
+        throw runtime_error("Invalid circuit file format");
+    }
 
     for (auto comp : components) {
         delete comp;
     }
     components.clear();
 
+    int modeInt;
+    archive(modeInt);
+    currentMode = static_cast<CircuitMode>(modeInt);
+
     size_t numComponents;
     archive(numComponents);
 
     for (size_t i = 0; i < numComponents; i++) {
-        string type;
-        archive(type);
-
-        int posX, posY;
-        archive(posX, posY);
+        string typeName;
+        archive(typeName);
 
         Component* comp = nullptr;
-        if (type == "Resistor") {
+
+        if (typeName == "Resistor") {
             Resistor* resistor = new Resistor("", 0, 0, 0);
             archive(*resistor);
             comp = resistor;
-        } else if (type == "Capacitor") {
+        }
+        else if (typeName == "Capacitor") {
             Capacitor* capacitor = new Capacitor("", 0, 0, 0);
             archive(*capacitor);
             comp = capacitor;
-        } else if (type == "Inductor") {
+        }
+        else if (typeName == "Inductor") {
             Inductor* inductor = new Inductor("", 0, 0, 0);
             archive(*inductor);
             comp = inductor;
-        } else if (type == "VoltageSource") {
+        }
+        else if (typeName == "VoltageSource") {
             VoltageSource* vs = new VoltageSource("", 0, 0, 0);
             archive(*vs);
             comp = vs;
-        } else if (type == "CurrentSource") {
+        }
+        else if (typeName == "CurrentSource") {
             CurrentSource* cs = new CurrentSource("", 0, 0, 0);
             archive(*cs);
             comp = cs;
-        } else if (type == "Diode") {
+        }
+        else if (typeName == "Diode") {
             Diode* diode = new Diode("", 0, 0);
             archive(*diode);
             comp = diode;
-        } else if (type == "Ground") {
+        }
+        else if (typeName == "Ground") {
             Ground* ground = new Ground("", 0);
             archive(*ground);
             comp = ground;
-        } else if (type == "SinVoltageSource") {
+        }
+        else if (typeName == "SinVoltageSource") {
             SinVoltageSource* svs = new SinVoltageSource("", 0, 0, 0, 0, 0, 0);
             archive(*svs);
             comp = svs;
-        } else if (type == "SinCurrentSource") {
-            SinCurrentSource* css = new SinCurrentSource("", 0, 0, 0, 0, 0, 0);
-            archive(*css);
-            comp = css;
-        } else if (type == "PulseVoltageSource") {
+        }
+        else if (typeName == "SinCurrentSource") {
+            SinCurrentSource* scs = new SinCurrentSource("", 0, 0, 0, 0, 0, 0);
+            archive(*scs);
+            comp = scs;
+        }
+        else if (typeName == "PulseVoltageSource") {
             PulseVoltageSource* pvs = new PulseVoltageSource("", 0, 0, 0, 0, 0, 0, 0, 0, 0);
             archive(*pvs);
             comp = pvs;
-        } else if (type == "PulseCurrentSource") {
+        }
+        else if (typeName == "PulseCurrentSource") {
             PulseCurrentSource* pcs = new PulseCurrentSource("", 0, 0, 0, 0, 0, 0, 0, 0, 0);
             archive(*pcs);
             comp = pcs;
         }
+        else if (typeName == "VCVS") {
+            VCVS* vcvs = new VCVS("", 0, 0, 0, 0, 0);
+            archive(*vcvs);
+            comp = vcvs;
+        }
+        else if (typeName == "VCCS") {
+            VCCS* vccs = new VCCS("", 0, 0, 0, 0, 0);
+            archive(*vccs);
+            comp = vccs;
+        }
+        else if (typeName == "CCVS") {
+            CCVS* ccvs = new CCVS("", 0, 0, "", 0);
+            archive(*ccvs);
+            comp = ccvs;
+        }
+        else if (typeName == "CCCS") {
+            CCCS* cccs = new CCCS("", 0, 0, "", 0);
+            archive(*cccs);
+            comp = cccs;
+        }
+        else if (typeName == "Wire") {
+            Wire* wire = new Wire("", 0, 0);
+            archive(*wire);
+            comp = wire;
+        }
 
         if (comp) {
-            if (comp) {
-                comp->setPosition(posX, posY);
-                components.push_back(comp);
-            }
+            components.push_back(comp);
         }
     }
 
-    archive(
-            maxNode,
-            wireConnections,
-            nodePositions,
-            nodeMap,
-            reverseNodeMap,
-            nextNodeNumber
-    );
+    archive(wireConnections);
+
+    archive(maxNode, nodePositions, nodeMap, reverseNodeMap, nextNodeNumber);
+
+    updateAnalysisMode();
 }
 
 void Circuit::saveToFile(const string& filename) const {
     try {
-        std::ofstream ofs(filename, std::ios::binary);
+        string actualFilename = ensureExtension(filename);
+        std::ofstream ofs(actualFilename, std::ios::binary);
         cereal::BinaryOutputArchive archive(ofs);
         save(archive);
-        cout << "Circuit saved successfully to: " << filename << endl;
+        cout << "Circuit saved successfully to: " << actualFilename << endl;
     } catch (const std::exception& e) {
         cerr << "Error saving circuit: " << e.what() << endl;
     }
@@ -3734,23 +3717,41 @@ void Circuit::saveToFile(const string& filename) const {
 
 bool Circuit::loadFromFile(const string& filename) {
     try {
-        std::ifstream ifs(filename, std::ios::binary);
+        string actualFilename = ensureExtension(filename);
+
+        std::ifstream ifs(actualFilename, std::ios::binary);
         if (!ifs.is_open()) {
-            cerr << "Could not open file: " << filename << endl;
+            cerr << "Could not open file: " << actualFilename << endl;
             return false;
         }
 
-        cereal::BinaryInputArchive archive(ifs);
-        load(archive);
-
-        // Set appropriate mode based on file extension
-        if (filename.find(".cir") != string::npos) {
-            currentMode = DC; // Or detect from saved data
+        try {
+            cereal::BinaryInputArchive archive(ifs);
+            load(archive);
+            cout << "Circuit loaded successfully from binary format: " << actualFilename << endl;
+            return true;
         }
+        catch (const std::exception& e) {
+            cerr << "Binary load failed: " << e.what() << endl;
+            cerr << "Trying text format..." << endl;
 
-        cout << "Circuit loaded successfully from: " << filename << endl;
-        return true;
-    } catch (const std::exception& e) {
+            ifs.close();
+            ifs.open(actualFilename);
+
+            if (!ifs.is_open()) {
+                cerr << "Could not reopen file as text: " << actualFilename << endl;
+                return false;
+            }
+
+            resetGlobalState();
+            processCircuitFile(actualFilename, *this);
+            calculateNodePositions();
+            updateAnalysisMode();
+            cout << "Circuit loaded successfully from text format: " << actualFilename << endl;
+            return true;
+        }
+    }
+    catch (const std::exception& e) {
         cerr << "Error loading circuit: " << e.what() << endl;
         return false;
     }
@@ -3994,7 +3995,6 @@ void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
 void showSinParametersDialog(SDL_Renderer* renderer) {
     SDL_Rect dialog = {250, 150, 400, 300};
 
-    // Wait for user input
     bool done = false;
     SDL_Event event;
     TextBox* activeParamBox = nullptr;
@@ -4046,7 +4046,6 @@ void showSinParametersDialog(SDL_Renderer* renderer) {
                 done = true;
             }
 
-            // Check text box clicks
             else if (isMouseOver(ampBox.rect, x, y)) {
                 activeParamBox = &ampBox;
                 inputText = ampBox.text;
@@ -4077,7 +4076,6 @@ void showSinParametersDialog(SDL_Renderer* renderer) {
 void showPulseParametersDialog(SDL_Renderer* renderer) {
     SDL_Rect dialog = {250, 100, 400, 500};
 
-    // Wait for user input
     bool done = false;
     SDL_Event event;
     TextBox* activeParamBox = nullptr;
@@ -4141,7 +4139,6 @@ void showPulseParametersDialog(SDL_Renderer* renderer) {
                 done = true;
             }
 
-            // Check text box clicks
             else if (isMouseOver(v1Box.rect, x, y)) {
                 activeParamBox = &v1Box;
                 inputText = v1Box.text;
@@ -4375,7 +4372,6 @@ void drawSinSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2
         float x = x1 + t * (x2 - x1);
         float y = y1 + t * (y2 - y1);
 
-        // Create sine wave pattern
         float offset = amplitude * sin(t * M_PI * 2);
         points[i].x = x + px * offset;
         points[i].y = y + py * offset;
@@ -4404,7 +4400,6 @@ void drawPulseSourcePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int 
         float x = x1 + t * (x2 - x1);
         float y = y1 + t * (y2 - y1);
 
-        // Create pulse pattern (low-high-low)
         float offset = (i > 1 && i < 4) ? amplitude : -amplitude;
         points[i].x = x + px * offset;
         points[i].y = y + py * offset;
@@ -4419,7 +4414,6 @@ void drawVCVSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     int centerX = (x1 + x2) / 2;
     int centerY = (y1 + y2) / 2;
 
-    // Draw diamond
     SDL_Point diamond[5] = {
             {centerX, centerY - size},
             {centerX + size, centerY},
@@ -4431,11 +4425,9 @@ void drawVCVSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
     SDL_RenderDrawLines(renderer, diamond, 5);
 
-    // Draw leads
     SDL_RenderDrawLine(renderer, x1, y1, centerX, centerY - size);
     SDL_RenderDrawLine(renderer, x2, y2, centerX, centerY + size);
 
-    // Draw control path indicator (simplified for preview)
     SDL_RenderDrawLine(renderer, centerX + size, centerY, centerX + size*2, centerY);
 }
 
@@ -4444,7 +4436,6 @@ void drawVCCSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     int centerX = (x1 + x2) / 2;
     int centerY = (y1 + y2) / 2;
 
-    // Draw diamond
     SDL_Point diamond[5] = {
             {centerX, centerY - size},
             {centerX + size, centerY},
@@ -4456,16 +4447,13 @@ void drawVCCSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
     SDL_RenderDrawLines(renderer, diamond, 5);
 
-    // Draw arrow inside diamond
     SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
     SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
     SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
 
-    // Draw leads
     SDL_RenderDrawLine(renderer, x1, y1, centerX - size, centerY);
     SDL_RenderDrawLine(renderer, x2, y2, centerX + size, centerY);
 
-    // Draw control path indicator (simplified for preview)
     SDL_RenderDrawLine(renderer, centerX + size, centerY, centerX + size*2, centerY);
 }
 
@@ -4474,7 +4462,6 @@ void drawCCVSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     int centerX = (x1 + x2) / 2;
     int centerY = (y1 + y2) / 2;
 
-    // Draw diamond
     SDL_Point diamond[5] = {
             {centerX, centerY - size},
             {centerX + size, centerY},
@@ -4486,11 +4473,9 @@ void drawCCVSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
     SDL_RenderDrawLines(renderer, diamond, 5);
 
-    // Draw leads
     SDL_RenderDrawLine(renderer, x1, y1, centerX, centerY - size);
     SDL_RenderDrawLine(renderer, x2, y2, centerX, centerY + size);
 
-    // Draw control arrow
     SDL_Point controlPoint = {centerX + size*2, centerY};
     SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
     SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
@@ -4502,7 +4487,6 @@ void drawCCCSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     int centerX = (x1 + x2) / 2;
     int centerY = (y1 + y2) / 2;
 
-    // Draw diamond
     SDL_Point diamond[5] = {
             {centerX, centerY - size},
             {centerX + size, centerY},
@@ -4514,16 +4498,13 @@ void drawCCCSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
     SDL_RenderDrawLines(renderer, diamond, 5);
 
-    // Draw arrow inside diamond
     SDL_RenderDrawLine(renderer, centerX, centerY - size/2, centerX, centerY + size/2);
     SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX - size/3, centerY + size/4);
     SDL_RenderDrawLine(renderer, centerX, centerY + size/2, centerX + size/3, centerY + size/4);
 
-    // Draw leads
     SDL_RenderDrawLine(renderer, x1, y1, centerX - size, centerY);
     SDL_RenderDrawLine(renderer, x2, y2, centerX + size, centerY);
 
-    // Draw control arrow
     SDL_Point controlPoint = {centerX + size*2, centerY};
     SDL_RenderDrawLine(renderer, centerX + size, centerY, controlPoint.x, controlPoint.y);
     SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y - 5);
@@ -4534,7 +4515,6 @@ void drawWirePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
     SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
 
-    // Draw small circles at connection points
     const int pointSize = 3;
     SDL_Rect p1 = {x1 - pointSize, y1 - pointSize, pointSize * 2, pointSize * 2};
     SDL_Rect p2 = {x2 - pointSize, y2 - pointSize, pointSize * 2, pointSize * 2};
@@ -4753,14 +4733,14 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                         break;
                     }
                     case PLACE_CCVS: {
-                        string vsName = "CCVS"; // Using node1Box for controlling source name
+                        string vsName = "CCVS";
                         double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
                         name = "H" + to_string(compCount++);
                         newComp = new CCVS(name, node1, node2, vsName, gain);
                         break;
                     }
                     case PLACE_CCCS: {
-                        string vsName = "CCCS"; // Using node1Box for controlling source name
+                        string vsName = "CCCS";
                         double gain = valueBox.text.empty() ? 1.0 : parseSpiceValue(valueBox.text);
                         name = "F" + to_string(compCount++);
                         newComp = new CCCS(name, node1, node2, vsName, gain);
@@ -5059,22 +5039,9 @@ void renderShortcutHelp(SDL_Renderer* renderer) {
 
 void handleSaveButton(Circuit* circuit, string& currentCircuitFile) {
     if (currentCircuitFile.empty()) {
-        // Show save dialog
         SaveAsDialog = true;
     } else {
         circuit->saveToFile(ensureExtension(currentCircuitFile));
-    }
-}
-
-void handleLoadButton(Circuit*& circuit, string& currentCircuitFile, const string& filename) {
-    Circuit* newCircuit = new Circuit();
-    if (newCircuit->loadFromFile(ensureExtension(filename))) {
-        delete circuit;
-        circuit = newCircuit;
-        currentCircuitFile = filename;
-        calculateNodePositions(*circuit);
-    } else {
-        delete newCircuit;
     }
 }
 
@@ -5089,7 +5056,6 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
 
     renderText("Select Color", dialog.x + 10, dialog.y + 10, currentTheme.text);
 
-    // Draw color palette
     const int colorsPerRow = 4;
     const int buttonSize = 35;
     const int spacing = 10;
@@ -5110,7 +5076,6 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
         SDL_RenderDrawRect(renderer, &colorBtn);
     }
 
-    // Add cancel button
     SDL_Rect cancelBtn = {dialog.x + dialog.w - 80, dialog.y + dialog.h - 40, 70, 30};
     SDL_SetRenderDrawColor(renderer, RED.r, RED.g, RED.b, 255);
     SDL_RenderFillRect(renderer, &cancelBtn);
@@ -5118,7 +5083,6 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
 
     SDL_RenderPresent(renderer);
 
-    // Wait for color selection
     bool colorSelected = false;
     SDL_Event event;
 
@@ -5127,7 +5091,6 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
             int mx = event.button.x;
             int my = event.button.y;
 
-            // Check color buttons
             for (size_t i = 0; i < colorPalette.size(); i++) {
                 int row = i / colorsPerRow;
                 int col = i % colorsPerRow;
@@ -5146,13 +5109,11 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
                 }
             }
 
-            // Check cancel button
             if (mx >= cancelBtn.x && mx <= cancelBtn.x + cancelBtn.w &&
                 my >= cancelBtn.y && my <= cancelBtn.y + cancelBtn.h) {
                 colorSelected = true;
             }
 
-            // If clicked outside the dialog, close it
             if (!(mx >= dialog.x && mx <= dialog.x + dialog.w &&
                   my >= dialog.y && my <= dialog.y + dialog.h)) {
                 colorSelected = true;
@@ -5165,30 +5126,24 @@ void showColorDialog(SDL_Renderer* renderer, int x, int y, Circuit* circuit) {
 }
 
 void handleLegendClick(Circuit* circuit, int x, int y, const SDL_Rect& plotArea) {
-    if (x < plotArea.x + 10 || x > plotArea.x + 150) return; // Only handle clicks in legend area
+    if (x < plotArea.x + 10 || x > plotArea.x + 150) return;
 
     int legendYStart = plotArea.y + 10;
     int legendItemHeight = 20;
 
-    // Calculate which legend item was clicked
     int legendIndex = (y - legendYStart) / legendItemHeight;
 
     if (legendIndex >= 0 && legendIndex < circuit->plotSignals.size()) {
-        // Check if click was on visibility indicator (first 15px)
         if (x >= plotArea.x + 10 && x <= plotArea.x + 25) {
-            // Toggle visibility
             circuit->plotSignals[legendIndex].toggleVisibility();
         }
-            // Check if click was on color box (next 15px)
         else if (x >= plotArea.x + 30 && x <= plotArea.x + 45) {
-            // Select signal and show color dialog
             for (auto& sig : circuit->plotSignals) {
                 sig.selected = false;
             }
             circuit->plotSignals[legendIndex].selected = true;
             circuit->selectedSignalIndex = legendIndex;
 
-            // Show color selection dialog (you'll need to implement this)
             showColorDialog(renderer, x, y, circuit);
         }
     }
@@ -5287,7 +5242,6 @@ int main(int argc, char* argv[]) {
                     int x = event.button.x;
                     int y = event.button.y;
 
-                    // Check if click is in the plot area (legend)
                     if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
                         y >= plotArea.y && y <= plotArea.y + plotArea.h) {
 
@@ -5484,7 +5438,6 @@ int main(int argc, char* argv[]) {
                 if (FileDialog) {
                     SDL_Rect dialog = {200, 150, 400, 400};
 
-                    // First check if user clicked on a file item
                     bool fileClicked = false;
                     for (size_t i = 0; i < circuitFiles.size(); i++) {
                         SDL_Rect fileRect = {dialog.x + 20, dialog.y + 60 + (int)i * 30, 360, 25};
@@ -5496,23 +5449,20 @@ int main(int argc, char* argv[]) {
                             processCircuitFile(circuitFiles[i], *circuit);
                             currentCircuitFile = circuitFiles[i];
                             calculateNodePositions(*circuit);
+                            circuit->updateAnalysisMode();
                             FileDialog = false;
                             fileClicked = true;
                             break;
                         }
                     }
 
-                    // If no file was clicked, check for button clicks
                     if (!fileClicked) {
                         if (x >= dialog.x + 100 && x <= dialog.x + 200 &&
                             y >= dialog.y + 330 && y <= dialog.y + 370) {
-                            // Open button clicked - but we already handled file clicks above
-                            // This would be for a default file or other logic
                             FileDialog = false;
                         }
                         else if (x >= dialog.x + 220 && x <= dialog.x + 320 &&
                                  y >= dialog.y + 330 && y <= dialog.y + 370) {
-                            // Cancel button clicked
                             FileDialog = false;
                         }
                     }
