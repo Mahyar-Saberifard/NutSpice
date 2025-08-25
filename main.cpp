@@ -212,7 +212,7 @@ bool showSources = false;
 bool showSemis = false;
 bool showDependents = false;
 
-Button darkModeBtn = {460, 5, 160, 30, "Dark Mode", currentTheme.button};
+Button darkModeBtn = {390, 5, 140, 30, "Dark Mode", currentTheme.button};
 Button passiveBtn;
 Button sourcesBtn;
 Button semiBtn;
@@ -257,7 +257,7 @@ enum ComponentType {
     VCVS_SOURCE,
     VCCS_SOURCE,
     CCCS_SOURCE,
-    CCVS_SOURCE,
+    CCVS_SOURCE
 };
 
 enum PlacementMode {
@@ -353,13 +353,6 @@ void changeToPreviousDirectory() {
     char newDir[MAX_PATH];
     GETCWD(newDir, sizeof(newDir));
     cout << "Changed to directory: " << newDir << endl;
-}
-
-void drawWire(SDL_Renderer* renderer, int x1, int y1, int x2, int y2, SDL_Color color) {
-    if (x1 != x2 || y1 != y2) {
-        SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-        SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
-    }
 }
 
 int getOrCreateNode(const string& nodeName) {
@@ -479,13 +472,16 @@ public:
             case GROUND: typeStr = "Ground"; break;
             case SIN_VOLTAGE_SOURCE: typeStr = "Sinusoidal Voltage Source"; break;
             case PULSE_VOLTAGE_SOURCE: typeStr = "Pulse Voltage Source"; break;
+            case SIN_CURRENT_SOURCE: typeStr = "Sinusoid Current Source"; break;
+            case PULSE_CURRENT_SOURCE: typeStr = "Pulse Current Source"; break;
             case VCVS_SOURCE: typeStr = "VCVS Source"; break;
             case VCCS_SOURCE: typeStr = "VCCS Source"; break;
             case CCVS_SOURCE: typeStr = "CCVS Source"; break;
             case CCCS_SOURCE: typeStr = "CCCS Source"; break;
         }
         return typeStr + " " + name + " " + getNodeName(node1) + " " + getNodeName(node2) + " " + to_string(value);
-    }    virtual void setPosition(int x, int y) {
+    }
+    virtual void setPosition(int x, int y) {
         posX = x;
         posY = y;
     }
@@ -794,6 +790,9 @@ public:
             if (comp->type == GROUND) {
                 return true;
             }
+            if (comp->node1 == 0 || comp->node2 == 0) {
+                return true;
+            }
         }
         return false;
     }
@@ -833,8 +832,8 @@ public:
         if (comp->node1 > maxNode) maxNode = comp->node1;
         if (comp->node2 > maxNode) maxNode = comp->node2;
 
-        if (comp->type == CAPACITOR || comp->type == INDUCTOR) {
-            hasDynamic = true;
+        if (comp->type == CAPACITOR || comp->type == INDUCTOR || comp->type == SIN_VOLTAGE_SOURCE || comp->type == SIN_CURRENT_SOURCE || comp->type == PULSE_VOLTAGE_SOURCE || comp->type == PULSE_CURRENT_SOURCE) {
+            currentMode = TRANSIENT;
         }
     }
 
@@ -1753,7 +1752,6 @@ SDL_Point getNodePosition(int node) {
 class Resistor : public Component {
 public:
 
-
     Resistor(const string& n, int n1, int n2, double val) : Component(RESISTOR, n, n1, n2, val) {}
 
     void stamp(vector<vector<double>>& G,
@@ -1839,7 +1837,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -1944,7 +1942,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2066,7 +2064,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2197,7 +2195,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2
+                type, name, nodeName1, nodeName2, node1, node2, posX, posY
         );
     }
 };
@@ -2246,7 +2244,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2
+                type, name, nodeName1, nodeName2, node1, node2, posX, posY
         );
     }
 };
@@ -2319,7 +2317,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2418,7 +2416,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
+                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset, posX, posY
         );
     }
 };
@@ -2527,7 +2525,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, v1, v2, td, tf, tr, pw, per
+                type, name, nodeName1, nodeName2, node1, node2, v1, v2, td, tf, tr, pw, per, posX, posY
         );
     }
 };
@@ -2595,7 +2593,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value
+                type, name, nodeName1, nodeName2, node1, node2, value, posX, posY
         );
     }
 };
@@ -2655,7 +2653,8 @@ public:
             float x = p1.x + t * (p2.x - p1.x);
             float y = p1.y + t * (p2.y - p1.y);
 
-            float offset = (i % 2) ? amplitude : -amplitude;
+            // Create sine wave pattern
+            float offset = amplitude * sin(t * M_PI * 2);
             points[i].x = x + px * offset;
             points[i].y = y + py * offset;
         }
@@ -2688,7 +2687,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset
+                type, name, nodeName1, nodeName2, node1, node2, value, amplitude, frequency, phase, offset, posX, posY
         );
     }
 };
@@ -2757,7 +2756,8 @@ public:
             float x = p1.x + t * (p2.x - p1.x);
             float y = p1.y + t * (p2.y - p1.y);
 
-            float offset = (i % 2) ? amplitude : -amplitude;
+            // Create pulse pattern (low-high-low)
+            float offset = (i > 1 && i < 4) ? amplitude : -amplitude;
             points[i].x = x + px * offset;
             points[i].y = y + py * offset;
         }
@@ -2790,7 +2790,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, i1, i2, td, tr, tf, pw, per
+                type, name, nodeName1, nodeName2, node1, node2, i1, i2, td, tr, tf, pw, per, posX, posY
         );
     }
 };
@@ -2904,7 +2904,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
+                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2, posX, posY
         );
     }
 };
@@ -2995,7 +2995,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
+                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex, posX, posY
         );
     }
 };
@@ -3108,7 +3108,7 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2
+                type, name, nodeName1, nodeName2, node1, node2, ctrlNode1, ctrlNode2, posX, posY
         );
     }
 };
@@ -3198,7 +3198,71 @@ public:
     template <class Archive>
     void serialize(Archive& archive) {
         archive(
-                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex
+                type, name, nodeName1, nodeName2, node1, node2, controllingVoltageSourceName, controllingSourceIndex, posX, posY
+        );
+    }
+};
+
+class Wire : public Component {
+public:
+    Wire(const string& n, int n1, int n2) : Component(RESISTOR, n, n1, n2, 1e-6) {}
+
+    string getType() override { return "Wire"; }
+
+    void stamp(vector<vector<double>>& G,
+               vector<vector<double>>&,
+               vector<vector<double>>&,
+               vector<vector<double>>&,
+               vector<double>&,
+               vector<double>&,
+               int&) override {
+        double conductance = 1.0 / value;
+
+        if (node1 != 0) {
+            G[node1-1][node1-1] += conductance;
+            if (node2 != 0) {
+                G[node1-1][node2-1] -= conductance;
+                G[node2-1][node1-1] -= conductance;
+            }
+        }
+        if (node2 != 0) {
+            G[node2-1][node2-1] += conductance;
+        }
+    }
+
+    void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const override {
+        SDL_Point p1 = nodePositions.at(node1);
+        SDL_Point p2 = nodePositions.at(node2);
+
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawLine(renderer, p1.x, p1.y, p2.x, p2.y);
+
+        // Optional: draw wire indicator
+        int midX = (p1.x + p2.x) / 2;
+        int midY = (p1.y + p2.y) / 2;
+        SDL_Rect wireIndicator = {midX - 2, midY - 2, 4, 4};
+        SDL_RenderFillRect(renderer, &wireIndicator);
+    }
+
+    SDL_Rect getBoundingBox(const map<int, SDL_Point>& nodePositions) const {
+        SDL_Point p1 = nodePositions.at(node1);
+        SDL_Point p2 = nodePositions.at(node2);
+
+        SDL_Rect rect;
+        rect.x = min(p1.x, p2.x) - 5;
+        rect.y = min(p1.y, p2.y) - 5;
+        rect.w = abs(p1.x - p2.x) + 10;
+        rect.h = abs(p1.y - p2.y) + 10;
+        return rect;
+    }
+
+    Component* clone() const override {
+        return new Wire(*this);
+    }
+    template <class Archive>
+    void serialize(Archive& archive) {
+        archive(
+                type, name, nodeName1, nodeName2, node1, node2, 1e-6, posX, posY
         );
     }
 };
@@ -3434,7 +3498,6 @@ void resetGlobalState() {
     currents.clear();
     Vtimes.clear();
     Itimes.clear();
-    hasDynamic = false;
     showVoltage = true;
     showCurrent = false;
 }
@@ -3884,14 +3947,12 @@ void drawToolbar(SDL_Renderer* renderer) {
 
     Button fileBtn = {10, 5, 80, 30, "File", currentTheme.button, false};
     Button editBtn = {100, 5, 80, 30, "Edit", currentTheme.button, false};
-    Button viewBtn = {190, 5, 80, 30, "View", currentTheme.button, false};
-    Button analyzeBtn = {280, 5, 80, 30, "Analyze", currentTheme.button, false};
-    Button toolsBtn = {370, 5, 80, 30, "Tools", currentTheme.button, false};
-    Button darkModeBtn = {460, 5, 100, 30, darkMode ? "Light Mode" : "Dark Mode", currentTheme.button};
+    Button analyzeBtn = {190, 5, 100, 30, "Analyze", currentTheme.button, false};
+    Button toolsBtn = {300, 5, 80, 30, "Place", currentTheme.button, false};
+    Button darkModeBtn = {390, 5, 140, 30, darkMode ? "Light Mode" : "Dark Mode", currentTheme.button};
 
     renderButton(fileBtn);
     renderButton(editBtn);
-    renderButton(viewBtn);
     renderButton(analyzeBtn);
     renderButton(toolsBtn);
     renderButton(darkModeBtn);
@@ -3932,36 +3993,6 @@ void getPerpendicularPoints(int x1, int y1, int x2, int y2, int offset,
 
 void showSinParametersDialog(SDL_Renderer* renderer) {
     SDL_Rect dialog = {250, 150, 400, 300};
-    SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
-    SDL_RenderFillRect(renderer, &dialog);
-    SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-    SDL_RenderDrawRect(renderer, &dialog);
-
-    string title = isVoltageSource ? "Sinusoidal Voltage Source Parameters" : "Sinusoidal Current Source Parameters";
-    renderText(title, dialog.x + 20, dialog.y + 20, currentTheme.text);
-
-    renderText("Amplitude:", dialog.x + 20, dialog.y + 60, currentTheme.text);
-    ampBox.rect = {dialog.x + 150, dialog.y + 60, 100, 30};
-    renderTextBox(ampBox);
-
-    renderText("Frequency (Hz):", dialog.x + 20, dialog.y + 100, currentTheme.text);
-    freqBox.rect = {dialog.x + 150, dialog.y + 100, 100, 30};
-    renderTextBox(freqBox);
-
-    renderText("Phase (deg):", dialog.x + 20, dialog.y + 140, currentTheme.text);
-    phaseBox.rect = {dialog.x + 150, dialog.y + 140, 100, 30};
-    renderTextBox(phaseBox);
-
-    renderText("DC Offset:", dialog.x + 20, dialog.y + 180, currentTheme.text);
-    offsetBox.rect = {dialog.x + 150, dialog.y + 180, 100, 30};
-    renderTextBox(offsetBox);
-
-    Button okBtn = {dialog.x + 100, dialog.y + 220, 100, 40, "OK", GREEN};
-    Button cancelBtn = {dialog.x + 220, dialog.y + 220, 100, 40, "Cancel", RED};
-    renderButton(okBtn);
-    renderButton(cancelBtn);
-
-    SDL_RenderPresent(renderer);
 
     // Wait for user input
     bool done = false;
@@ -3970,6 +4001,38 @@ void showSinParametersDialog(SDL_Renderer* renderer) {
     string inputText = "";
 
     while (!done && SDL_WaitEvent(&event)) {
+
+        SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
+        SDL_RenderFillRect(renderer, &dialog);
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawRect(renderer, &dialog);
+
+        string title = isVoltageSource ? "Sinusoidal Voltage Source Parameters" : "Sinusoidal Current Source Parameters";
+        renderText(title, dialog.x + 20, dialog.y + 20, currentTheme.text);
+
+        renderText("Amplitude:", dialog.x + 20, dialog.y + 60, currentTheme.text);
+        ampBox.rect = {dialog.x + 150, dialog.y + 60, 100, 30};
+        renderTextBox(ampBox);
+
+        renderText("Freq (Hz):", dialog.x + 20, dialog.y + 100, currentTheme.text);
+        freqBox.rect = {dialog.x + 150, dialog.y + 100, 100, 30};
+        renderTextBox(freqBox);
+
+        renderText("Phase:", dialog.x + 20, dialog.y + 140, currentTheme.text);
+        phaseBox.rect = {dialog.x + 150, dialog.y + 140, 100, 30};
+        renderTextBox(phaseBox);
+
+        renderText("DC Offset:", dialog.x + 20, dialog.y + 180, currentTheme.text);
+        offsetBox.rect = {dialog.x + 150, dialog.y + 180, 100, 30};
+        renderTextBox(offsetBox);
+
+        Button okBtn = {dialog.x + 100, dialog.y + 220, 100, 40, "OK", GREEN};
+        Button cancelBtn = {dialog.x + 220, dialog.y + 220, 100, 40, "Cancel", RED};
+        renderButton(okBtn);
+        renderButton(cancelBtn);
+
+        SDL_RenderPresent(renderer);
+
         if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
             int x = event.button.x;
             int y = event.button.y;
@@ -4000,89 +4063,19 @@ void showSinParametersDialog(SDL_Renderer* renderer) {
                 activeParamBox = nullptr;
             }
         }
-        else if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_ESCAPE) {
-                showSinParams = false;
-                done = true;
-            }
-            else if (event.key.keysym.sym == SDLK_RETURN && activeParamBox) {
-                activeParamBox->text = inputText;
-                activeParamBox = nullptr;
-                inputText = "";
-
-                // Redraw the dialog
-                SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
-                SDL_RenderFillRect(renderer, &dialog);
-                SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-                SDL_RenderDrawRect(renderer, &dialog);
-
-                renderText(title, dialog.x + 20, dialog.y + 20, currentTheme.text);
-                renderText("Amplitude:", dialog.x + 20, dialog.y + 60, currentTheme.text);
-                renderTextBox(ampBox);
-                renderText("Frequency (Hz):", dialog.x + 20, dialog.y + 100, currentTheme.text);
-                renderTextBox(freqBox);
-                renderText("Phase (deg):", dialog.x + 20, dialog.y + 140, currentTheme.text);
-                renderTextBox(phaseBox);
-                renderText("DC Offset:", dialog.x + 20, dialog.y + 180, currentTheme.text);
-                renderTextBox(offsetBox);
-                renderButton(okBtn);
-                renderButton(cancelBtn);
-                SDL_RenderPresent(renderer);
-            }
-            else if (event.key.keysym.sym == SDLK_BACKSPACE && !inputText.empty() && activeParamBox) {
-                inputText.pop_back();
-            }
+        else if (event.key.keysym.sym == SDLK_BACKSPACE && !inputText.empty() && activeParamBox) {
+            inputText.pop_back();
+            activeParamBox->text = inputText;
         }
         else if (event.type == SDL_TEXTINPUT && activeParamBox) {
             inputText += event.text.text;
+            activeParamBox->text = inputText;
         }
     }
 }
 
 void showPulseParametersDialog(SDL_Renderer* renderer) {
     SDL_Rect dialog = {250, 100, 400, 500};
-    SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
-    SDL_RenderFillRect(renderer, &dialog);
-    SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-    SDL_RenderDrawRect(renderer, &dialog);
-
-    string title = isVoltageSource ? "Pulse Voltage Source Parameters" : "Pulse Current Source Parameters";
-    renderText(title, dialog.x + 20, dialog.y + 20, currentTheme.text);
-
-    renderText("Initial Value:", dialog.x + 20, dialog.y + 60, currentTheme.text);
-    v1Box.rect = {dialog.x + 150, dialog.y + 60, 100, 30};
-    renderTextBox(v1Box);
-
-    renderText("Pulse Value:", dialog.x + 20, dialog.y + 100, currentTheme.text);
-    v2Box.rect = {dialog.x + 150, dialog.y + 100, 100, 30};
-    renderTextBox(v2Box);
-
-    renderText("Delay Time:", dialog.x + 20, dialog.y + 140, currentTheme.text);
-    tdBox.rect = {dialog.x + 150, dialog.y + 140, 100, 30};
-    renderTextBox(tdBox);
-
-    renderText("Rise Time:", dialog.x + 20, dialog.y + 180, currentTheme.text);
-    trBox.rect = {dialog.x + 150, dialog.y + 180, 100, 30};
-    renderTextBox(trBox);
-
-    renderText("Fall Time:", dialog.x + 20, dialog.y + 220, currentTheme.text);
-    tfBox.rect = {dialog.x + 150, dialog.y + 220, 100, 30};
-    renderTextBox(tfBox);
-
-    renderText("Pulse Width:", dialog.x + 20, dialog.y + 260, currentTheme.text);
-    pwBox.rect = {dialog.x + 150, dialog.y + 260, 100, 30};
-    renderTextBox(pwBox);
-
-    renderText("Period:", dialog.x + 20, dialog.y + 300, currentTheme.text);
-    perBox.rect = {dialog.x + 150, dialog.y + 300, 100, 30};
-    renderTextBox(perBox);
-
-    Button okBtn = {dialog.x + 100, dialog.y + 350, 100, 40, "OK", GREEN};
-    Button cancelBtn = {dialog.x + 220, dialog.y + 350, 100, 40, "Cancel", RED};
-    renderButton(okBtn);
-    renderButton(cancelBtn);
-
-    SDL_RenderPresent(renderer);
 
     // Wait for user input
     bool done = false;
@@ -4091,6 +4084,50 @@ void showPulseParametersDialog(SDL_Renderer* renderer) {
     string inputText = "";
 
     while (!done && SDL_WaitEvent(&event)) {
+
+        SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
+        SDL_RenderFillRect(renderer, &dialog);
+        SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
+        SDL_RenderDrawRect(renderer, &dialog);
+
+        string title = isVoltageSource ? "Pulse Voltage Source Parameters" : "Pulse Current Source Parameters";
+        renderText(title, dialog.x + 20, dialog.y + 20, currentTheme.text);
+
+        renderText("Value1:", dialog.x + 20, dialog.y + 60, currentTheme.text);
+        v1Box.rect = {dialog.x + 150, dialog.y + 60, 100, 30};
+        renderTextBox(v1Box);
+
+        renderText("Value2:", dialog.x + 20, dialog.y + 100, currentTheme.text);
+        v2Box.rect = {dialog.x + 150, dialog.y + 100, 100, 30};
+        renderTextBox(v2Box);
+
+        renderText("Delay:", dialog.x + 20, dialog.y + 140, currentTheme.text);
+        tdBox.rect = {dialog.x + 150, dialog.y + 140, 100, 30};
+        renderTextBox(tdBox);
+
+        renderText("Rise Time:", dialog.x + 20, dialog.y + 180, currentTheme.text);
+        trBox.rect = {dialog.x + 150, dialog.y + 180, 100, 30};
+        renderTextBox(trBox);
+
+        renderText("Fall Time:", dialog.x + 20, dialog.y + 220, currentTheme.text);
+        tfBox.rect = {dialog.x + 150, dialog.y + 220, 100, 30};
+        renderTextBox(tfBox);
+
+        renderText("PWidth:", dialog.x + 20, dialog.y + 260, currentTheme.text);
+        pwBox.rect = {dialog.x + 150, dialog.y + 260, 100, 30};
+        renderTextBox(pwBox);
+
+        renderText("Period:", dialog.x + 20, dialog.y + 300, currentTheme.text);
+        perBox.rect = {dialog.x + 150, dialog.y + 300, 100, 30};
+        renderTextBox(perBox);
+
+        Button okBtn = {dialog.x + 100, dialog.y + 350, 100, 40, "OK", GREEN};
+        Button cancelBtn = {dialog.x + 220, dialog.y + 350, 100, 40, "Cancel", RED};
+        renderButton(okBtn);
+        renderButton(cancelBtn);
+
+        SDL_RenderPresent(renderer);
+
         if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
             int x = event.button.x;
             int y = event.button.y;
@@ -4130,47 +4167,13 @@ void showPulseParametersDialog(SDL_Renderer* renderer) {
                 activeParamBox = nullptr;
             }
         }
-        else if (event.type == SDL_KEYDOWN) {
-            if (event.key.keysym.sym == SDLK_ESCAPE) {
-                showPulseParams = false;
-                done = true;
-            }
-            else if (event.key.keysym.sym == SDLK_RETURN && activeParamBox) {
-                activeParamBox->text = inputText;
-                activeParamBox = nullptr;
-                inputText = "";
-
-                // Redraw the dialog
-                SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
-                SDL_RenderFillRect(renderer, &dialog);
-                SDL_SetRenderDrawColor(renderer, currentTheme.text.r, currentTheme.text.g, currentTheme.text.b, 255);
-                SDL_RenderDrawRect(renderer, &dialog);
-
-                renderText(title, dialog.x + 20, dialog.y + 20, currentTheme.text);
-                renderText("Initial Value:", dialog.x + 20, dialog.y + 60, currentTheme.text);
-                renderTextBox(v1Box);
-                renderText("Pulse Value:", dialog.x + 20, dialog.y + 100, currentTheme.text);
-                renderTextBox(v2Box);
-                renderText("Delay Time:", dialog.x + 20, dialog.y + 140, currentTheme.text);
-                renderTextBox(tdBox);
-                renderText("Rise Time:", dialog.x + 20, dialog.y + 180, currentTheme.text);
-                renderTextBox(trBox);
-                renderText("Fall Time:", dialog.x + 20, dialog.y + 220, currentTheme.text);
-                renderTextBox(tfBox);
-                renderText("Pulse Width:", dialog.x + 20, dialog.y + 260, currentTheme.text);
-                renderTextBox(pwBox);
-                renderText("Period:", dialog.x + 20, dialog.y + 300, currentTheme.text);
-                renderTextBox(perBox);
-                renderButton(okBtn);
-                renderButton(cancelBtn);
-                SDL_RenderPresent(renderer);
-            }
-            else if (event.key.keysym.sym == SDLK_BACKSPACE && !inputText.empty() && activeParamBox) {
-                inputText.pop_back();
-            }
+        else if (event.key.keysym.sym == SDLK_BACKSPACE && !inputText.empty() && activeParamBox) {
+            inputText.pop_back();
+            activeParamBox->text = inputText;
         }
         else if (event.type == SDL_TEXTINPUT && activeParamBox) {
             inputText += event.text.text;
+            activeParamBox->text = inputText;
         }
     }
 }
@@ -4527,6 +4530,18 @@ void drawCCCSPreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
     SDL_RenderDrawLine(renderer, controlPoint.x, controlPoint.y, controlPoint.x - 5, controlPoint.y + 5);
 }
 
+void drawWirePreview(SDL_Renderer* renderer, int x1, int y1, int x2, int y2) {
+    SDL_SetRenderDrawColor(renderer, GREEN.r, GREEN.g, GREEN.b, 255);
+    SDL_RenderDrawLine(renderer, x1, y1, x2, y2);
+
+    // Draw small circles at connection points
+    const int pointSize = 3;
+    SDL_Rect p1 = {x1 - pointSize, y1 - pointSize, pointSize * 2, pointSize * 2};
+    SDL_Rect p2 = {x2 - pointSize, y2 - pointSize, pointSize * 2, pointSize * 2};
+    SDL_RenderFillRect(renderer, &p1);
+    SDL_RenderFillRect(renderer, &p2);
+}
+
 int findOrCreateNodeAt(int x, int y) {
     const int NODE_PROXIMITY_THRESHOLD = 15;
 
@@ -4588,14 +4603,24 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
 
     if (isPlacingComponent) {
         if (currentPlacementMode == PLACE_WIRE) {
+            if (!isPlacingComponent) {
+                placementStartPoint = {x, y};
+                isPlacingComponent = true;
+                return;
+            }
+
             int node1 = findOrCreateNodeAt(placementStartPoint.x, placementStartPoint.y);
             int node2 = findOrCreateNodeAt(x, y);
 
             if (node1 != node2) {
                 saveUndoState(circuit);
-                circuit->addWire(node1, node2);
+                string name = "W" + to_string(compCount++);
+                circuit->addComponent(new Wire(name, node1, node2));
                 cout << "Created wire between node " << node1 << " and " << node2 << endl;
             }
+
+            isPlacingComponent = false;
+            return;
         }
         else {
             string name;
@@ -4760,11 +4785,6 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
 }
 
 void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
-    for (const auto& wire : circuit.getWires()) {
-        auto p1 = nodePositions.at(wire.first);
-        auto p2 = nodePositions.at(wire.second);
-        drawWire(renderer, p1.x, p1.y, p2.x, p2.y, currentTheme.text);
-    }
 
     for (const auto& comp : circuit.getComponents()) {
         comp->render(renderer, nodePositions);
@@ -4806,13 +4826,17 @@ void drawCircuit(const Circuit& circuit, SDL_Renderer* renderer) {
                 drawGroundPreview(renderer, mouseX, mouseY);
                 break;
             case PLACE_WIRE:
-                drawWire(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY, GREEN);
+                drawWirePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
                 break;
             case PLACE_SIN_VOLTAGE_SOURCE:
+                drawSinSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
             case PLACE_SIN_CURRENT_SOURCE:
                 drawSinSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
                 break;
             case PLACE_PULSE_VOLTAGE_SOURCE:
+                drawPulseSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
+                break;
             case PLACE_PULSE_CURRENT_SOURCE:
                 drawPulseSourcePreview(renderer, placementStartPoint.x, placementStartPoint.y, mouseX, mouseY);
                 break;
@@ -4999,6 +5023,10 @@ void renderStatus(SDL_Renderer* renderer) {
             case PLACE_DIODE: modeName = "Diode (Shift+D)"; break;
             case PLACE_GROUND: modeName = "Ground (Shift+G)"; break;
             case PLACE_WIRE: modeName = "Wire (W)"; break;
+            case PLACE_SIN_VOLTAGE_SOURCE: modeName = "Sin Voltage Source (V)"; break;
+            case PLACE_PULSE_VOLTAGE_SOURCE: modeName = "Pulse Voltage Source (V)"; break;
+            case PLACE_SIN_CURRENT_SOURCE: modeName = "Sin Current Source (I)"; break;
+            case PLACE_PULSE_CURRENT_SOURCE: modeName = "Pulse Current Source (I)"; break;
             case PLACE_VCVS: modeName = "VCVS"; break;
             case PLACE_VCCS: modeName = "VCCS"; break;
             case PLACE_CCVS: modeName = "CCVS"; break;
@@ -5208,7 +5236,6 @@ int main(int argc, char* argv[]) {
             if (event.type == SDL_QUIT) {
                 running = false;
             }
-
             else if (event.type == SDL_MOUSEBUTTONDOWN) {
                 int x, y;
                 SDL_GetMouseState(&x, &y);
@@ -5240,14 +5267,14 @@ int main(int argc, char* argv[]) {
                         AnalysisSettings = false;
                         continue;
                     }
-                    else if (x >= 280 && x <= 360) {
+                    else if (x >= 190 && x <= 290) {
                         AnalysisSettings = !AnalysisSettings;
                         FileMenu = false;
                         EditMenu = false;
                         ComponentLibrary = false;
                         continue;
                     }
-                    else if (x >= 370 && x <= 450) {
+                    else if (x >= 300 && x <= 380) {
                         ComponentLibrary = !ComponentLibrary;
                         FileMenu = false;
                         EditMenu = false;
@@ -5255,7 +5282,6 @@ int main(int argc, char* argv[]) {
                         continue;
                     }
                 }
-
 
                 if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
                     int x = event.button.x;
@@ -5289,7 +5315,6 @@ int main(int argc, char* argv[]) {
                     if (isMouseOver(closeBtn.rect, x, y)) {
                         ComponentLibrary = false;
                     }
-                    continue;
                 }
                 if (x >= plotArea.x && x <= plotArea.x + plotArea.w &&
                     y >= plotArea.y && y <= plotArea.y + plotArea.h) {
@@ -5419,7 +5444,7 @@ int main(int argc, char* argv[]) {
                     if (x >= analysisWindow.x + 50 && x <= analysisWindow.x + 150 &&
                         y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
                         try {
-                            if (hasDynamic) {
+                            if (circuit->currentMode == Circuit::TRANSIENT) {
                                 circuit->analyzeTransient(stod(stepBox.text),stod(stopBox.text));
                                 circuit->printTransientResults(Vtimes, voltages, currents, circuit->listNodes().size() - 1);
                             }
