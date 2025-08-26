@@ -127,6 +127,10 @@ bool AnalysisSettings = false;
 bool showShortcutHelp = false;
 double tStep = 0.01;
 double tStop = 1;
+string dcSweepSource;
+double sweepStart = 0.0;
+double sweepStop = 5.0;
+double sweepStep = 0.1;
 map<int, SDL_Point> nodePositions;
 
 SDL_Window* window = nullptr;
@@ -165,6 +169,10 @@ TextBox valueBox = {{10, SCREEN_HEIGHT - 60, 100, 40}, "Value", false};
 TextBox stepBox = {400, 210, 150, 30, to_string(tStep)};
 TextBox stopBox = {400, 260, 150, 30, to_string(tStop)};
 TextBox nameBox = {{300, 210, 180, 30}, "Name", false};
+TextBox sweepSourceBox = {400, 310, 150, 30, dcSweepSource};
+TextBox sweepStartBox = {400, 350, 150, 30, to_string(sweepStart)};
+TextBox sweepStopBox = {400, 390, 150, 30, to_string(sweepStop)};
+TextBox sweepStepBox = {400, 430, 150, 30, to_string(sweepStep)};
 TextBox ampBox, freqBox, phaseBox, offsetBox;
 TextBox v1Box, v2Box, tdBox, trBox, tfBox, pwBox, perBox;
 TextBox* activeTextBox = nullptr;
@@ -2046,12 +2054,13 @@ class Diode : public Component {
     const double n;
     double lastVoltage;
     double current;
+    double effectiveResistance;
 
 public:
     Diode(const string& name, int node1, int node2)
             : Component(DIODE, name, node1, node2, 0.0),
               Is(1e-14), Vt(0.026), n(1.0),
-              lastVoltage(0.7), current(0.0) {}
+              lastVoltage(0.0), current(0.0), effectiveResistance(1e12) {}
 
     void stamp(vector<vector<double>>& G,
                vector<vector<double>>& /*C*/,
@@ -2061,31 +2070,23 @@ public:
                vector<double>& /*x*/,
                int& /*matrixSize*/) override {
 
-        double vd = lastVoltage;
+        if (lastVoltage > 0.7) {
+            effectiveResistance = 1e-6;
+        } else {
+            effectiveResistance = 1e12;
+        }
 
-        double expArg = min(vd / (n * Vt), 40.0);
-        double expVd = exp(expArg);
-
-        double g = (Is / (n * Vt)) * expVd;
-
-        double Ieq = Is * (expVd - 1) - g * vd;
+        double conductance = 1.0 / effectiveResistance;
 
         if (node1 != 0) {
+            G[node1 - 1][node1 - 1] += conductance;
             if (node2 != 0) {
-                G[node1 - 1][node1 - 1] += g;
-                G[node1 - 1][node2 - 1] -= g;
-                G[node2 - 1][node1 - 1] -= g;
-                G[node2 - 1][node2 - 1] += g;
-
-                J[node1 - 1] -= Ieq;
-                J[node2 - 1] += Ieq;
-            } else {
-                G[node1 - 1][node1 - 1] += g;
-                J[node1 - 1] -= Ieq;
+                G[node1 - 1][node2 - 1] -= conductance;
+                G[node2 - 1][node1 - 1] -= conductance;
             }
-        } else if (node2 != 0) {
-            G[node2 - 1][node2 - 1] += g;
-            J[node2 - 1] += Ieq;
+        }
+        if (node2 != 0) {
+            G[node2 - 1][node2 - 1] += conductance;
         }
     }
 
@@ -2094,8 +2095,11 @@ public:
         double v2 = (node2 == 0) ? 0.0 : nodeVoltages[node2 - 1];
         lastVoltage = v1 - v2;
 
-        double expArg = min(lastVoltage / (n * Vt), 40.0);
-        current = Is * (exp(expArg) - 1);
+        if (lastVoltage > 0.7) {
+            current = lastVoltage / 1e-6;
+        } else {
+            current = lastVoltage / 1e12;
+        }
     }
 
     double getCurrent(const vector<double>& /*nodeVoltages*/) const override {
@@ -3801,7 +3805,7 @@ void redo(Circuit*& currentCircuit) {
 }
 
 void showAnalysisSettings(SDL_Renderer* renderer) {
-    SDL_Rect analysisWindow = {250, 150, 360, 300};
+    SDL_Rect analysisWindow = {250, 150, 360, 350};
 
     SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
     SDL_RenderFillRect(renderer, &analysisWindow);
@@ -3814,8 +3818,23 @@ void showAnalysisSettings(SDL_Renderer* renderer) {
     renderText("Stop Time:", analysisWindow.x + 20, analysisWindow.y + 110, currentTheme.text);
     renderTextBox(stopBox);
 
-    Button runBtn = {analysisWindow.x + 50, analysisWindow.y + 220, 100, 40, "Run", GREEN};
-    Button cancelBtn = {analysisWindow.x + 200, analysisWindow.y + 220, 100, 40, "Cancel", RED};
+    renderText("DC Sweep:", analysisWindow.x + 20, analysisWindow.y + 160, currentTheme.text);
+    renderTextBox(sweepSourceBox);
+
+    renderText("Start:", analysisWindow.x + 20, analysisWindow.y + 200, currentTheme.text);
+    renderTextBox(sweepStartBox);
+
+    renderText("Stop:", analysisWindow.x + 20, analysisWindow.y + 240, currentTheme.text);
+    renderTextBox(sweepStopBox);
+
+    renderText("Step:", analysisWindow.x + 20, analysisWindow.y + 280, currentTheme.text);
+    renderTextBox(sweepStepBox);
+
+    Button dcSweepBtn = {analysisWindow.x + 250, analysisWindow.y + 320, 100, 40, "Sweep", BLUE};
+    renderButton(dcSweepBtn);
+
+    Button runBtn = {analysisWindow.x + 10, analysisWindow.y + 320, 100, 40, "Run", GREEN};
+    Button cancelBtn = {analysisWindow.x + 130, analysisWindow.y + 320, 100, 40, "Cancel", RED};
     renderButton(runBtn);
     renderButton(cancelBtn);
 }
@@ -3855,7 +3874,7 @@ void showFileMenu(SDL_Renderer* renderer, SDL_Rect menuRect) {
     SDL_SetRenderDrawColor(renderer, currentTheme.background.r, currentTheme.background.g, currentTheme.background.b, 255);
     SDL_RenderFillRect(renderer, &menuRect);
 
-    Button newBtn = {menuRect.x + 10, menuRect.y + 40, 120, 30, "New Circuit", currentTheme.button};
+    Button newBtn = {menuRect.x + 10, menuRect.y + 40, 120, 30, "New File", currentTheme.button};
     Button openBtn = {menuRect.x + 10, menuRect.y + 80, 120, 30, "Open", currentTheme.button};
     Button saveBtn = {menuRect.x + 10, menuRect.y + 120, 120, 30, "Save", currentTheme.button};
     Button saveAsBtn = {menuRect.x + 10, menuRect.y + 160, 120, 30, "Save As", currentTheme.button};
@@ -4617,57 +4636,57 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                 switch(currentPlacementMode) {
                     case PLACE_RESISTOR:
                         name = "R" + to_string(compCount++);
-                        if (value <= 0) value = 1000.0;
-                        newComp = new Resistor(name, node1, node2, value);
-                        newComp->nodeName1 = node1Name;
-                        newComp->nodeName2 = node2Name;
-                        break;
+                    if (value <= 0) value = 1000.0;
+                    newComp = new Resistor(name, node1, node2, value);
+                    newComp->nodeName1 = node1Name;
+                    newComp->nodeName2 = node2Name;
+                    break;
                     case PLACE_CAPACITOR:
                         name = "C" + to_string(compCount++);
-                        if (value <= 0) value = 1e-6;
-                        newComp = new Capacitor(name, node1, node2, value);
-                        newComp->nodeName1 = node1Name;
-                        newComp->nodeName2 = node2Name;
-                        break;
+                    if (value <= 0) value = 1e-6;
+                    newComp = new Capacitor(name, node1, node2, value);
+                    newComp->nodeName1 = node1Name;
+                    newComp->nodeName2 = node2Name;
+                    break;
                     case PLACE_INDUCTOR:
                         name = "L" + to_string(compCount++);
-                        if (value <= 0) value = 1e-3;
-                        newComp = new Inductor(name, node1, node2, value);
-                        newComp->nodeName1 = node1Name;
-                        newComp->nodeName2 = node2Name;
-                        break;
+                    if (value <= 0) value = 1e-3;
+                    newComp = new Inductor(name, node1, node2, value);
+                    newComp->nodeName1 = node1Name;
+                    newComp->nodeName2 = node2Name;
+                    break;
                     case PLACE_VOLTAGE_SOURCE:
                         name = "V" + to_string(compCount++);
-                        if (value <= 0) value = 5.0;
-                        newComp = new VoltageSource(name, node1, node2, value);
-                        newComp->nodeName1 = node1Name;
-                        newComp->nodeName2 = node2Name;
-                        break;
+                    if (value <= 0) value = 5.0;
+                    newComp = new VoltageSource(name, node1, node2, value);
+                    newComp->nodeName1 = node1Name;
+                    newComp->nodeName2 = node2Name;
+                    break;
                     case PLACE_CURRENT_SOURCE:
                         name = "I" + to_string(compCount++);
-                        if (value <= 0) value = 0.1;
-                        newComp = new CurrentSource(name, node1, node2, value);
-                        newComp->nodeName1 = node1Name;
-                        newComp->nodeName2 = node2Name;
-                        break;
+                    if (value <= 0) value = 0.1;
+                    newComp = new CurrentSource(name, node1, node2, value);
+                    newComp->nodeName1 = node1Name;
+                    newComp->nodeName2 = node2Name;
+                    break;
                     case PLACE_DIODE:
                         name = "D" + to_string(compCount++);
-                        newComp = new Diode(name, node1, node2);
-                        newComp->nodeName1 = node1Name;
-                        newComp->nodeName2 = node2Name;
-                        break;
+                    newComp = new Diode(name, node1, node2);
+                    newComp->nodeName1 = node1Name;
+                    newComp->nodeName2 = node2Name;
+                    break;
                     case PLACE_GROUND:
                         name = "GND" + to_string(compCount++);
-                        newComp = new Ground(name, node1);
-                        newComp->nodeName1 = node1Name;
-                        newComp->nodeName2 = node2Name;
-                        break;
+                    newComp = new Ground(name, node1);
+                    newComp->nodeName1 = node1Name;
+                    newComp->nodeName2 = node2Name;
+                    break;
                     case PLACE_SIN_VOLTAGE_SOURCE: {
                         name = "VSIN" + to_string(compCount++);
-                        double amp = parseSpiceValue(ampBox.text);
-                        double freq = parseSpiceValue(freqBox.text);
-                        double phase = parseSpiceValue(phaseBox.text);
-                        double offset = parseSpiceValue(offsetBox.text);
+                        double amp = ampBox.text.empty() ? 1.0 : parseSpiceValue(ampBox.text);
+                        double freq = freqBox.text.empty() ? 1000.0 : parseSpiceValue(freqBox.text);
+                        double phase = phaseBox.text.empty() ? 0.0 : parseSpiceValue(phaseBox.text);
+                        double offset = offsetBox.text.empty() ? 0.0 : parseSpiceValue(offsetBox.text);
                         newComp = new SinVoltageSource(name, node1, node2, amp, freq, phase, offset);
                         newComp->nodeName1 = node1Name;
                         newComp->nodeName2 = node2Name;
@@ -4675,10 +4694,10 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                     }
                     case PLACE_SIN_CURRENT_SOURCE: {
                         name = "ISIN" + to_string(compCount++);
-                        double amp = parseSpiceValue(ampBox.text);
-                        double freq = parseSpiceValue(freqBox.text);
-                        double phase = parseSpiceValue(phaseBox.text);
-                        double offset = parseSpiceValue(offsetBox.text);
+                        double amp = ampBox.text.empty() ? 1.0 : parseSpiceValue(ampBox.text);
+                        double freq = freqBox.text.empty() ? 1000.0 : parseSpiceValue(freqBox.text);
+                        double phase = phaseBox.text.empty() ? 0.0 : parseSpiceValue(phaseBox.text);
+                        double offset = offsetBox.text.empty() ? 0.0 : parseSpiceValue(offsetBox.text);
                         newComp = new SinCurrentSource(name, node1, node2, amp, freq, phase, offset);
                         newComp->nodeName1 = node1Name;
                         newComp->nodeName2 = node2Name;
@@ -4686,13 +4705,13 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                     }
                     case PLACE_PULSE_VOLTAGE_SOURCE: {
                         name = "VPULSE" + to_string(compCount++);
-                        double v1 = parseSpiceValue(v1Box.text);
-                        double v2 = parseSpiceValue(v2Box.text);
-                        double td = parseSpiceValue(tdBox.text);
-                        double tr = parseSpiceValue(trBox.text);
-                        double tf = parseSpiceValue(tfBox.text);
-                        double pw = parseSpiceValue(pwBox.text);
-                        double per = parseSpiceValue(perBox.text);
+                        double v1 = v1Box.text.empty() ? 0.0 : parseSpiceValue(v1Box.text);
+                        double v2 = v2Box.text.empty() ? 5.0 : parseSpiceValue(v2Box.text);
+                        double td = tdBox.text.empty() ? 0.0 : parseSpiceValue(tdBox.text);
+                        double tr = trBox.text.empty() ? 1e-6 : parseSpiceValue(trBox.text);
+                        double tf = tfBox.text.empty() ? 1e-6 : parseSpiceValue(tfBox.text);
+                        double pw = pwBox.text.empty() ? 1e-3 : parseSpiceValue(pwBox.text);
+                        double per = perBox.text.empty() ? 2e-3 : parseSpiceValue(perBox.text);
                         newComp = new PulseVoltageSource(name, node1, node2, v1, v2, td, tr, tf, pw, per);
                         newComp->nodeName1 = node1Name;
                         newComp->nodeName2 = node2Name;
@@ -4700,13 +4719,13 @@ void handleComponentPlacement(Circuit* circuit, int x, int y) {
                     }
                     case PLACE_PULSE_CURRENT_SOURCE: {
                         name = "IPULSE" + to_string(compCount++);
-                        double i1 = parseSpiceValue(v1Box.text);
-                        double i2 = parseSpiceValue(v2Box.text);
-                        double td = parseSpiceValue(tdBox.text);
-                        double tr = parseSpiceValue(trBox.text);
-                        double tf = parseSpiceValue(tfBox.text);
-                        double pw = parseSpiceValue(pwBox.text);
-                        double per = parseSpiceValue(perBox.text);
+                        double i1 = v1Box.text.empty() ? 0.0 : parseSpiceValue(v1Box.text);
+                        double i2 = v2Box.text.empty() ? 0.1 : parseSpiceValue(v2Box.text);
+                        double td = tdBox.text.empty() ? 0.0 : parseSpiceValue(tdBox.text);
+                        double tr = trBox.text.empty() ? 1e-6 : parseSpiceValue(trBox.text);
+                        double tf = tfBox.text.empty() ? 1e-6 : parseSpiceValue(tfBox.text);
+                        double pw = pwBox.text.empty() ? 1e-3 : parseSpiceValue(pwBox.text);
+                        double per = perBox.text.empty() ? 2e-3 : parseSpiceValue(perBox.text);
                         newComp = new PulseCurrentSource(name, node1, node2, i1, i2, td, tr, tf, pw, per);
                         newComp->nodeName1 = node1Name;
                         newComp->nodeName2 = node2Name;
@@ -5163,6 +5182,10 @@ int main(int argc, char* argv[]) {
     double valuePan = 0.0;
     bool Tstep = false;
     bool Tstop = false;
+    bool DCs = false;
+    bool DCTstart = false;
+    bool DCTstep = false;
+    bool DCTstop = false;
 
     string currentCircuitFile = "";
     Circuit* circuit = new Circuit();
@@ -5399,8 +5422,8 @@ int main(int argc, char* argv[]) {
 
                 if (AnalysisSettings) {
                     SDL_Rect analysisWindow = {250, 150, 350, 300};
-                    if (x >= analysisWindow.x + 50 && x <= analysisWindow.x + 150 &&
-                        y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
+                    if (x >= analysisWindow.x + 10 && x <= analysisWindow.x + 110 &&
+                        y >= analysisWindow.y + 320 && y <= analysisWindow.y + 360) {
                         try {
                             if (circuit->currentMode == Circuit::TRANSIENT) {
                                 circuit->analyzeTransient(stod(stepBox.text),stod(stopBox.text));
@@ -5418,8 +5441,8 @@ int main(int argc, char* argv[]) {
                             cerr << "Analysis error: " << e.what() << endl;
                         }
                     }
-                    else if (x >= analysisWindow.x + 200 && x <= analysisWindow.x + 300 &&
-                             y >= analysisWindow.y + 220 && y <= analysisWindow.y + 260) {
+                    else if (x >= analysisWindow.x + 130 && x <= analysisWindow.x + 230 &&
+                             y >= analysisWindow.y + 320 && y <= analysisWindow.y + 360) {
                         AnalysisSettings = false;
                     }
                     else if (x >= 400 && x <= 550 &&
@@ -5435,6 +5458,50 @@ int main(int argc, char* argv[]) {
                         Tstop = true;
                         activeTextBox = &stopBox;
                         inputText = stopBox.text;
+                    }
+                    else if (x >= 400 && x <= 550 &&
+                             y >= 310 && y <= 350) {
+                        textInputActive = true;
+                        DCs = true;
+                        activeTextBox = &sweepSourceBox;
+                        inputText = sweepSourceBox.text;
+                    }
+                    else if (x >= 400 && x <= 550 &&
+                             y >= 360 && y <= 400) {
+                        textInputActive = true;
+                        DCTstart = true;
+                        activeTextBox = &sweepStartBox;
+                        inputText = sweepStartBox.text;
+                    }
+                    else if (x >= 400 && x <= 550 &&
+                             y >= 410 && y <= 450) {
+                        textInputActive = true;
+                        DCTstep = true;
+                        activeTextBox = &sweepStepBox;
+                        inputText = sweepStepBox.text;
+                    }
+                    else if (x >= 400 && x <= 550 &&
+                             y >= 460 && y <= 500) {
+                        textInputActive = true;
+                        DCTstop = true;
+                        activeTextBox = &sweepStopBox;
+                        inputText = sweepStopBox.text;
+                    }
+                    else if (x >= analysisWindow.x + 250 && x <= analysisWindow.x + 350 &&
+                             y >= analysisWindow.y + 320 && y <= analysisWindow.y + 360) {
+                        try {
+                            dcSweepSource = sweepSourceBox.text;
+                            sweepStart = stod(sweepStartBox.text);
+                            sweepStop = stod(sweepStopBox.text);
+                            sweepStep = stod(sweepStepBox.text);
+
+                            circuit->currentMode = Circuit::SWEEP;
+                            circuit->analyzeDCSweep(dcSweepSource, sweepStart, sweepStop, sweepStep);
+                            AnalysisSettings = false;
+                        }
+                        catch (const exception& e) {
+                            cerr << "DC Sweep error: " << e.what() << endl;
+                        }
                     }
                     continue;
                 }
@@ -5664,6 +5731,18 @@ int main(int argc, char* argv[]) {
             }
             else if (Tstop && AnalysisSettings) {
                 stopBox.text = inputText;
+            }
+            else if (DCs && AnalysisSettings) {
+                sweepSourceBox.text = inputText;
+            }
+            else if (DCTstart && AnalysisSettings) {
+                sweepStartBox.text = inputText;
+            }
+            else if (DCTstep && AnalysisSettings) {
+                sweepStepBox.text = inputText;
+            }
+            else if (DCTstop && AnalysisSettings) {
+                sweepStopBox.text = inputText;
             }
         }
 
