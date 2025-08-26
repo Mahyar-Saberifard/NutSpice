@@ -5460,32 +5460,32 @@ int main(int argc, char* argv[]) {
                         inputText = stopBox.text;
                     }
                     else if (x >= 400 && x <= 550 &&
-                             y >= 310 && y <= 350) {
+                             y >= 310 && y <= 340) {
                         textInputActive = true;
                         DCs = true;
                         activeTextBox = &sweepSourceBox;
                         inputText = sweepSourceBox.text;
                     }
                     else if (x >= 400 && x <= 550 &&
-                             y >= 360 && y <= 400) {
+                             y >= 350 && y <= 380) {
                         textInputActive = true;
                         DCTstart = true;
                         activeTextBox = &sweepStartBox;
                         inputText = sweepStartBox.text;
                     }
                     else if (x >= 400 && x <= 550 &&
-                             y >= 410 && y <= 450) {
-                        textInputActive = true;
-                        DCTstep = true;
-                        activeTextBox = &sweepStepBox;
-                        inputText = sweepStepBox.text;
-                    }
-                    else if (x >= 400 && x <= 550 &&
-                             y >= 460 && y <= 500) {
+                             y >= 390 && y <= 420) {
                         textInputActive = true;
                         DCTstop = true;
                         activeTextBox = &sweepStopBox;
                         inputText = sweepStopBox.text;
+                    }
+                    else if (x >= 400 && x <= 550 &&
+                             y >= 430 && y <= 450) {
+                        textInputActive = true;
+                        DCTstep = true;
+                        activeTextBox = &sweepStepBox;
+                        inputText = sweepStepBox.text;
                     }
                     else if (x >= analysisWindow.x + 250 && x <= analysisWindow.x + 350 &&
                              y >= analysisWindow.y + 320 && y <= analysisWindow.y + 360) {
