@@ -1112,7 +1112,7 @@ public:
 
         for (auto comp : components) {
             if (comp->type == VOLTAGE_SOURCE || comp->type == SIN_VOLTAGE_SOURCE ||
-                comp->type == PULSE_VOLTAGE_SOURCE) numVSources++;
+                comp->type == PULSE_VOLTAGE_SOURCE || comp->type == VCVS_SOURCE || comp->type == CCVS_SOURCE) numVSources++;
             if (comp->type == INDUCTOR) numInductors++;
         }
 
@@ -2773,21 +2773,28 @@ public:
             : Component(VCVS_SOURCE, n, n1, n2, gain), ctrlNode1(cn1), ctrlNode2(cn2) {}
 
     void stamp(vector<vector<double>>& G,
-               vector<vector<double>>& B,
-               vector<vector<double>>& C,
-               vector<vector<double>>& D,
-               vector<double>& J,
-               vector<double>& E,
-               int& nextVariable) override {
+           vector<vector<double>>& B,
+           vector<vector<double>>& C,
+           vector<vector<double>>& D,
+           vector<double>& J,
+           vector<double>& E,
+           int& nextVariable) override {
         int vsIndex = nextVariable++;
 
-        if (node1 != 0) B[node1 - 1][vsIndex] = 1;
-        if (node2 != 0) B[node2 - 1][vsIndex] = -1;
-        if (node1 != 0) C[vsIndex][node1 - 1] = 1;
-        if (node2 != 0) C[vsIndex][node2 - 1] = -1;
+        if (B.size() <= node1 - 1 && node1 != 0) B.resize(node1, vector<double>(B[0].size(), 0.0));
+        if (B.size() <= node2 - 1 && node2 != 0) B.resize(node2, vector<double>(B[0].size(), 0.0));
+        if (C.size() <= vsIndex) C.resize(vsIndex + 1, vector<double>(C[0].size(), 0.0));
+        if (D.size() <= vsIndex) D.resize(vsIndex + 1, vector<double>(D[0].size(), 0.0));
 
-        if (ctrlNode1 != 0) D[vsIndex][ctrlNode1 - 1] -= value;
-        if (ctrlNode2 != 0) D[vsIndex][ctrlNode2 - 1] += value;
+        if (node1 != 0 && vsIndex < B[0].size()) B[node1 - 1][vsIndex] = 1;
+        if (node2 != 0 && vsIndex < B[0].size()) B[node2 - 1][vsIndex] = -1;
+        if (node1 != 0 && vsIndex < C.size()) C[vsIndex][node1 - 1] = 1;
+        if (node2 != 0 && vsIndex < C.size()) C[vsIndex][node2 - 1] = -1;
+
+        if (ctrlNode1 != 0 && vsIndex < D.size() && ctrlNode1 - 1 < D[vsIndex].size())
+            D[vsIndex][ctrlNode1 - 1] -= value;
+        if (ctrlNode2 != 0 && vsIndex < D.size() && ctrlNode2 - 1 < D[vsIndex].size())
+            D[vsIndex][ctrlNode2 - 1] += value;
     }
 
     string getType() override { return "VCVS"; }
@@ -2885,20 +2892,26 @@ public:
     }
 
     void stamp(vector<vector<double>>& G,
-               vector<vector<double>>& B,
-               vector<vector<double>>& C,
-               vector<vector<double>>& D,
-               vector<double>& J,
-               vector<double>& E,
-               int& nextVariable) override {
+           vector<vector<double>>& B,
+           vector<vector<double>>& C,
+           vector<vector<double>>& D,
+           vector<double>& J,
+           vector<double>& E,
+           int& nextVariable) override {
         int vsIndex = nextVariable++;
 
-        if (node1 != 0) B[node1 - 1][vsIndex] = 1;
-        if (node2 != 0) B[node2 - 1][vsIndex] = -1;
-        if (node1 != 0) C[vsIndex][node1 - 1] = 1;
-        if (node2 != 0) C[vsIndex][node2 - 1] = -1;
+        if (B.size() <= node1 - 1 && node1 != 0) B.resize(node1, vector<double>(B[0].size(), 0.0));
+        if (B.size() <= node2 - 1 && node2 != 0) B.resize(node2, vector<double>(B[0].size(), 0.0));
+        if (C.size() <= vsIndex) C.resize(vsIndex + 1, vector<double>(C[0].size(), 0.0));
+        if (D.size() <= vsIndex) D.resize(vsIndex + 1, vector<double>(D[0].size(), 0.0));
 
-        D[vsIndex][controllingSourceIndex] = -value;
+        if (node1 != 0 && vsIndex < B[0].size()) B[node1 - 1][vsIndex] = 1;
+        if (node2 != 0 && vsIndex < B[0].size()) B[node2 - 1][vsIndex] = -1;
+        if (node1 != 0 && vsIndex < C.size()) C[vsIndex][node1 - 1] = 1;
+        if (node2 != 0 && vsIndex < C.size()) C[vsIndex][node2 - 1] = -1;
+
+        if (controllingSourceIndex >= 0 && vsIndex < D.size() && controllingSourceIndex < D[vsIndex].size())
+            D[vsIndex][controllingSourceIndex] = -value;
     }
 
     string getType() override { return "CCVS"; }
@@ -2965,17 +2978,25 @@ public:
             : Component(VCCS_SOURCE, n, n1, n2, gm), ctrlNode1(cn1), ctrlNode2(cn2) {}
 
     void stamp(vector<vector<double>>& G,
-               vector<vector<double>>& B,
-               vector<vector<double>>& C,
-               vector<vector<double>>& D,
-               vector<double>& J,
-               vector<double>& E,
-               int& nextVariable) override {
-        if (node1 != 0 && ctrlNode1 != 0) G[node1 - 1][ctrlNode1 - 1] += value;
-        if (node1 != 0 && ctrlNode2 != 0) G[node1 - 1][ctrlNode2 - 1] -= value;
-        if (node2 != 0 && ctrlNode1 != 0) G[node2 - 1][ctrlNode1 - 1] -= value;
-        if (node2 != 0 && ctrlNode2 != 0) G[node2 - 1][ctrlNode2 - 1] += value;
+           vector<vector<double>>& B,
+           vector<vector<double>>& C,
+           vector<vector<double>>& D,
+           vector<double>& J,
+           vector<double>& E,
+           int& nextVariable) override {
+        if (G.size() <= node1 - 1 && node1 != 0) G.resize(node1, vector<double>(G[0].size(), 0.0));
+        if (G.size() <= node2 - 1 && node2 != 0) G.resize(node2, vector<double>(G[0].size(), 0.0));
+
+        if (node1 != 0 && ctrlNode1 != 0 && ctrlNode1 - 1 < G[node1 - 1].size())
+            G[node1 - 1][ctrlNode1 - 1] += value;
+        if (node1 != 0 && ctrlNode2 != 0 && ctrlNode2 - 1 < G[node1 - 1].size())
+            G[node1 - 1][ctrlNode2 - 1] -= value;
+        if (node2 != 0 && ctrlNode1 != 0 && ctrlNode1 - 1 < G[node2 - 1].size())
+            G[node2 - 1][ctrlNode1 - 1] -= value;
+        if (node2 != 0 && ctrlNode2 != 0 && ctrlNode2 - 1 < G[node2 - 1].size())
+            G[node2 - 1][ctrlNode2 - 1] += value;
     }
+
     string getType() override { return "VCCS"; }
 
     void render(SDL_Renderer* renderer, const map<int, SDL_Point>& nodePositions) const {
@@ -3075,14 +3096,19 @@ public:
     }
 
     void stamp(vector<vector<double>>& G,
-               vector<vector<double>>& B,
-               vector<vector<double>>& C,
-               vector<vector<double>>& D,
-               vector<double>& J,
-               vector<double>& E,
-               int& nextVariable) override {
-        if (node1 != 0) D[node1 - 1][controllingSourceIndex] += value;
-        if (node2 != 0) D[node2 - 1][controllingSourceIndex] -= value;
+           vector<vector<double>>& B,
+           vector<vector<double>>& C,
+           vector<vector<double>>& D,
+           vector<double>& J,
+           vector<double>& E,
+           int& nextVariable) override {
+        if (D.size() <= node1 - 1 && node1 != 0) D.resize(node1, vector<double>(D[0].size(), 0.0));
+        if (D.size() <= node2 - 1 && node2 != 0) D.resize(node2, vector<double>(D[0].size(), 0.0));
+
+        if (node1 != 0 && controllingSourceIndex >= 0 && controllingSourceIndex < D[node1 - 1].size())
+            D[node1 - 1][controllingSourceIndex] += value;
+        if (node2 != 0 && controllingSourceIndex >= 0 && controllingSourceIndex < D[node2 - 1].size())
+            D[node2 - 1][controllingSourceIndex] -= value;
     }
 
     string getType() override { return "CCCS"; }
