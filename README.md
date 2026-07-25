@@ -11,7 +11,6 @@ original had outright bugs (see below).
 NutSpice_refactored/
 ├── CMakeLists.txt          ← cross-platform build (Linux / macOS / Windows)
 ├── Icon1.png               ← window icon (optional asset)
-├── input.txt, test1..4.txt ← example SPICE decks
 └── src/
     ├── Platform.h/.cpp     ← cross-platform filesystem + font/icon lookup
     ├── Theme.h/.cpp        ← colour palette + light/dark themes
