@@ -11,5 +11,7 @@
 !test4.txt
 !CMakeLists.txt
 !cereal/
+!cereal/**
 !src/
+!src/**
 !cmake-build-debug/Icon1.png
