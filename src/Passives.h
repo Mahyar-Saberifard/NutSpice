@@ -15,7 +15,7 @@ namespace nutspice
 
         void stamp(StampMatrices m) override;
         double getCurrent(const std::vector<double> &nodeVoltages) const override;
-        std::string getType() override { return "Resistor"; }
+        std::string getType() const override { return "Resistor"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -31,7 +31,7 @@ namespace nutspice
         void stamp(StampMatrices m) override;
         void update(double dt, const std::vector<double> &nodeVoltages) override;
         double getCurrent(const std::vector<double> &nodeVoltages) const override;
-        std::string getType() override { return "Capacitor"; }
+        std::string getType() const override { return "Capacitor"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -56,7 +56,7 @@ namespace nutspice
         void stamp(StampMatrices m) override;
         void update(double dt, const std::vector<double> &nodeVoltages) override;
         double getCurrent(const std::vector<double> &nodeVoltages) const override;
-        std::string getType() override { return "Inductor"; }
+        std::string getType() const override { return "Inductor"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -81,7 +81,7 @@ namespace nutspice
         void stamp(StampMatrices m) override;
         void update(double dt, const std::vector<double> &nodeVoltages) override;
         double getCurrent(const std::vector<double> &nodeVoltages) const override;
-        std::string getType() override { return "Diode"; }
+        std::string getType() const override { return "Diode"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -101,7 +101,7 @@ namespace nutspice
             : Component(GROUND, n, n1, 0, 0.0) {}
 
         void stamp(StampMatrices /*m*/) override {} // ground is implicit in MNA
-        std::string getType() override { return "Ground"; }
+        std::string getType() const override { return "Ground"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -121,7 +121,7 @@ namespace nutspice
             : Component(RESISTOR, n, n1, n2, 1e-6) {}
 
         void stamp(StampMatrices m) override;
-        std::string getType() override { return "Wire"; }
+        std::string getType() const override { return "Wire"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;

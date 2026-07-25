@@ -18,7 +18,7 @@ namespace nutspice
             : Component(VCVS_SOURCE, n, n1, n2, gain), ctrlNode1(cn1), ctrlNode2(cn2) {}
 
         void stamp(StampMatrices m) override;
-        std::string getType() override { return "VCVS"; }
+        std::string getType() const override { return "VCVS"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -41,7 +41,7 @@ namespace nutspice
             : Component(VCCS_SOURCE, n, n1, n2, gm), ctrlNode1(cn1), ctrlNode2(cn2) {}
 
         void stamp(StampMatrices m) override;
-        std::string getType() override { return "VCCS"; }
+        std::string getType() const override { return "VCCS"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -69,7 +69,7 @@ namespace nutspice
         void resolveIndices(const std::unordered_map<std::string, int> &voltageSourceIndexMap);
 
         void stamp(StampMatrices m) override;
-        std::string getType() override { return "CCVS"; }
+        std::string getType() const override { return "CCVS"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -97,7 +97,7 @@ namespace nutspice
         void resolveIndices(const std::unordered_map<std::string, int> &voltageSourceIndexMap);
 
         void stamp(StampMatrices m) override;
-        std::string getType() override { return "CCCS"; }
+        std::string getType() const override { return "CCCS"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;

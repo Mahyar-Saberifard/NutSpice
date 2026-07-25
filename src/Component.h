@@ -98,7 +98,7 @@ namespace nutspice
         virtual double getCurrent(const std::vector<double> & /*nodeVoltages*/) const { return 0.0; }
 
         virtual std::string getInfo() const;
-        virtual std::string getType() = 0;
+        virtual std::string getType() const = 0;
 
         virtual void setPosition(int x, int y)
         {
@@ -122,21 +122,21 @@ namespace nutspice
     // Helper used by Component::getInfo() and parsers.
     std::string componentTypeLabel(ComponentType t);
 
-    // cereal needs an external serialize() for std::pair<int,int> and SDL_Point.
-    namespace cereal
-    {
-        template <class Archive>
-        void serialize(Archive &archive, std::pair<int, int> &pair)
-        {
-            archive(pair.first, pair.second);
-        }
-        template <class Archive>
-        void serialize(Archive &archive, SDL_Point &point)
-        {
-            archive(point.x, point.y);
-        }
-    } // namespace cereal
-
 } // namespace nutspice
+
+// cereal needs an external serialize() for std::pair<int,int> and SDL_Point.
+namespace cereal
+{
+    template <class Archive>
+    void serialize(Archive &archive, std::pair<int, int> &pair)
+    {
+        archive(pair.first, pair.second);
+    }
+    template <class Archive>
+    void serialize(Archive &archive, SDL_Point &point)
+    {
+        archive(point.x, point.y);
+    }
+} // namespace cereal
 
 #endif // NUTSPICE_COMPONENT_H

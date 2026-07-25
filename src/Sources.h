@@ -14,7 +14,7 @@ namespace nutspice
             : Component(VOLTAGE_SOURCE, n, n1, n2, val) {}
 
         void stamp(StampMatrices m) override;
-        std::string getType() override { return "VoltageSource"; }
+        std::string getType() const override { return "VoltageSource"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -42,7 +42,7 @@ namespace nutspice
 
         void stamp(StampMatrices m) override;
         std::string getInfo() const override;
-        std::string getType() override { return "SinVoltageSource"; }
+        std::string getType() const override { return "SinVoltageSource"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -69,7 +69,7 @@ namespace nutspice
 
         void stamp(StampMatrices m) override;
         std::string getInfo() const override;
-        std::string getType() override { return "PulseVoltageSource"; }
+        std::string getType() const override { return "PulseVoltageSource"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -90,7 +90,7 @@ namespace nutspice
             : Component(CURRENT_SOURCE, n, n1, n2, val) {}
 
         void stamp(StampMatrices m) override;
-        std::string getType() override { return "CurrentSource"; }
+        std::string getType() const override { return "CurrentSource"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -118,7 +118,7 @@ namespace nutspice
 
         void stamp(StampMatrices m) override;
         std::string getInfo() const override;
-        std::string getType() override { return "SinCurrentSource"; }
+        std::string getType() const override { return "SinCurrentSource"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;
@@ -145,7 +145,7 @@ namespace nutspice
 
         void stamp(StampMatrices m) override;
         std::string getInfo() const override;
-        std::string getType() override { return "PulseCurrentSource"; }
+        std::string getType() const override { return "PulseCurrentSource"; }
         void render(SDL_Renderer *renderer,
                     const std::map<int, SDL_Point> &nodePositions) const override;
         SDL_Rect getBoundingBox(const std::map<int, SDL_Point> &nodePositions) const override;

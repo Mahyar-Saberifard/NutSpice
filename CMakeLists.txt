@@ -23,12 +23,47 @@ endif()
 # macOS (Homebrew):       brew install sdl2 sdl2_image sdl2_ttf sdl2_gfx cereal
 # Windows (vcpkg):        vcpkg install sdl2 sdl2-image sdl2-ttf sdl2-gfx cereal
 #                         then pass -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
-find_package(SDL2 REQUIRED)
-find_package(SDL2_image REQUIRED)
-find_package(SDL2_ttf REQUIRED)
-find_package(SDL2_gfx REQUIRED)
+
+include(FindPkgConfig)
+
+# ---- Helper: try find_package first (modern config-mode), fall back to pkg-config. ----
+macro(nutspice_find_sdl2_component COMPONENT UPPER)
+    # COMPONENT = SDL2_image, UPPER = SDL2_image (used for var prefix)
+    find_package(${COMPONENT} QUIET)
+    if(TARGET ${COMPONENT}::${COMPONENT})
+        message(STATUS "${COMPONENT}: found via find_package (config mode)")
+    else()
+        # Fall back to pkg-config.
+        pkg_check_modules(${UPPER} REQUIRED IMPORTED_TARGET ${COMPONENT})
+        if(TARGET PkgConfig::${UPPER})
+            add_library(${COMPONENT}::${COMPONENT} ALIAS PkgConfig::${UPPER})
+            message(STATUS "${COMPONENT}: found via pkg-config")
+        endif()
+    endif()
+endmacro()
+
+find_package(SDL2 QUIET)
+if(TARGET SDL2::SDL2)
+    message(STATUS "SDL2: found via find_package (config mode)")
+else()
+    pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+    if(TARGET PkgConfig::SDL2)
+        add_library(SDL2::SDL2 ALIAS PkgConfig::SDL2)
+        message(STATUS "SDL2: found via pkg-config")
+    endif()
+endif()
+
+nutspice_find_sdl2_component(SDL2_image SDL2_image)
+nutspice_find_sdl2_component(SDL2_ttf   SDL2_ttf)
+nutspice_find_sdl2_component(SDL2_gfx   SDL2_gfx)
 
 # ---- Cereal (header-only) ---------------------------------------------------
+# Cereal may be:
+#   (a) bundled inside the project tree  -> ${CMAKE_CURRENT_SOURCE_DIR}/cereal/include
+#                                            ${CMAKE_CURRENT_SOURCE_DIR}/include
+#                                            ${CMAKE_CURRENT_SOURCE_DIR}/cereal
+#                                            ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cereal/include
+#   (b) installed system-wide            -> libcereal-dev / brew cereal / vcpkg cereal
 set(_CEREAL_CANDIDATES
     "${CMAKE_CURRENT_SOURCE_DIR}/cereal/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -41,7 +76,6 @@ find_path(CEREAL_INCLUDE_DIR cereal/archives/binary.hpp
     NO_DEFAULT_PATH
 )
 if(NOT CEREAL_INCLUDE_DIR)
-    # Fall back to system search.
     find_path(CEREAL_INCLUDE_DIR cereal/archives/binary.hpp)
 endif()
 if(NOT CEREAL_INCLUDE_DIR)
