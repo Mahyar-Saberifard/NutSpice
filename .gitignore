@@ -3,7 +3,6 @@
 
 # Except these:
 !.gitignore
-!main.cpp
 !README.md
 !input.txt
 !test1.txt
@@ -12,4 +11,7 @@
 !test4.txt
 !CMakeLists.txt
 !cereal/
+!cereal/**
+!src/
+!src/**
 !cmake-build-debug/Icon1.png
